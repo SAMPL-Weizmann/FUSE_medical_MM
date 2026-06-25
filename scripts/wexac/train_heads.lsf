@@ -1,0 +1,30 @@
+#!/bin/bash
+# LSF (bsub) job: train + CV-evaluate classifier heads (Step 5).
+# Heads are tiny -> CPU queue, no GPU. Submit from the repo root:
+#   bsub < scripts/wexac/train_heads.lsf
+#
+# The experiment combo (aggregation.mode, head.type, ...) comes from
+# configs/train.yaml. To run a different combo, edit that file and resubmit,
+# or keep multiple config copies and pass one via CONFIG=... (see below).
+
+#BSUB -J fuse_train_heads
+#BSUB -q waic-short                    # CPU queue (change if your cluster differs)
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 1:00
+#BSUB -o logs/train_heads.%J.out
+#BSUB -e logs/train_heads.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh       # module load miniconda + conda activate
+source scripts/wexac/env.sh            # FUSE_* paths
+
+# CONFIG env var lets you point at an alternate config copy; default is the main one.
+CONFIG="${CONFIG:-configs/train.yaml}"
+python -u scripts/03_train_heads.py --config "$CONFIG" --device cpu
+
+echo "head training done"

@@ -1,0 +1,23 @@
+#!/bin/bash
+# LSF job: US annotation-shortcut probe (Tier-2 diagnostic). CPU only.
+#   bsub < scripts/wexac/us_probe.lsf
+
+#BSUB -J fuse_us_probe
+#BSUB -q waic-short                    # CPU queue (change if your cluster differs)
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 1:00
+#BSUB -o logs/us_probe.%J.out
+#BSUB -e logs/us_probe.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh       # module load miniconda + conda activate
+source scripts/wexac/env.sh            # FUSE_* paths
+
+python -u scripts/diagnostics/us_annotation_probe.py
+
+echo "us probe done"

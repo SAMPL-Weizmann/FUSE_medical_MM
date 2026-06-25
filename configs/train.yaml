@@ -1,0 +1,43 @@
+# =============================================================================
+# FUSE_medical_MM — classifier-head training (Step 5)
+# Each verifier = a frozen backbone's features + a trained head. Everything that
+# defines an experiment lives here: change one field, get a different run.
+# Results never overwrite across configs — outputs are keyed by agg+head+modality.
+# =============================================================================
+
+# --- which features to train on ---------------------------------------------
+experiment:
+  feature_set: "labeled"      # which extracted set under features_dir/
+  modalities: ["MG", "US"]    # train a head per modality
+  backbones: null             # null = all backbones found; or e.g. ["resnet50", "rad_dino_vit_b14"]
+
+# --- per-image -> per-patient aggregation (SWITCHABLE) ----------------------
+# per_patient : mean-pool a patient's image features into ONE vector, fit head.
+# per_image   : fit head on individual images, average predicted probs per
+#               patient at inference. (CV always splits at the patient level.)
+aggregation:
+  mode: "per_image"         # per_patient | per_image
+
+# --- classifier head (SWITCHABLE) -------------------------------------------
+# type: linear -> logistic-regression probe (no hidden layers)
+#       mlp    -> hidden layers given by mlp_layers (1-2 entries recommended)
+head:
+  type: "linear"              # linear | mlp
+  mlp_layers: [256]           # used only when type == mlp
+  dropout: 0.1                # used only when type == mlp
+  standardize: true           # z-score features (fit on train fold only)
+  class_weight: "balanced"    # balanced | none  (handles label imbalance)
+  epochs: 200
+  lr: 0.001
+  weight_decay: 0.0001
+  batch_size: 64              # mini-batch (per_image); per_patient uses full-batch
+
+# --- cross-validation (patient-level, stratified) ---------------------------
+cv:
+  folds: 5
+  seed: 42
+
+# --- io ----------------------------------------------------------------------
+io:
+  features_dir: "artifacts/features"   # where Step 4 wrote the .npz (FUSE_FEATURES_DIR overrides)
+  results_dir: "artifacts/heads"       # results go to results_dir/<agg>_<head>/<modality>/

@@ -1,0 +1,21 @@
+# Single env (Python 3.14 OK — torch 2.12+ ships 3.14 wheels):
+#   .venv/Scripts/python.exe -m pip install -r requirements.txt
+#
+# Data layer (Steps 1-4):
+numpy>=1.26
+pyyaml>=6.0
+
+# Feature extraction / backbones (Steps 5-6):
+# The default PyPI torch wheel is CPU-only. For CUDA, install from the
+# official index instead, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+torch>=2.2
+torchvision>=0.17
+timm>=1.0
+pillow>=10.0
+tqdm>=4.66
+# Extra backbone backends (non-timm verifiers):
+#   open_clip_torch -> BiomedCLIP
+#   transformers    -> RAD-DINO
+open_clip_torch>=2.24
+transformers>=4.40

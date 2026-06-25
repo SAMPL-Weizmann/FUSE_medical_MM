@@ -1,0 +1,33 @@
+#!/bin/bash
+# LSF (bsub) job for GPU feature extraction on WEXAC.
+# Submit from the repo root:   bsub < scripts/wexac/extract_features.lsf
+#
+# >>> FILL IN the placeholders marked __FILL_ME__ after the discovery step <<<
+# (queue name from `bqueues`, GPU memory from `nvidia-smi` on a GPU node).
+
+#BSUB -J fuse_extract
+#BSUB -q short-gpu                     # WAIC batch GPU queue (use long-gpu if >limit)
+#BSUB -gpu "num=1:j_exclusive=yes"     # 1 GPU, exclusive
+#BSUB -n 4                             # CPU cores (data loading)
+#BSUB -R "span[hosts=1]"               # keep all cores on the GPU host
+#BSUB -R "rusage[mem=32GB]"            # host memory
+#BSUB -W 2:00                          # wallclock HH:MM
+#BSUB -o logs/extract.%J.out
+#BSUB -e logs/extract.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"                         # dir you submitted from (repo root)
+mkdir -p logs
+
+# --- environment ------------------------------------------------------------
+source scripts/wexac/activate.sh       # module load miniconda + conda activate
+source scripts/wexac/env.sh            # FUSE_* dataset paths + HF cache
+
+# --- run --------------------------------------------------------------------
+# A40 (~49GB): batch 128 is comfortable even for the 518px ViTs. Bump if needed.
+python -u scripts/02_extract_features.py \
+    --sets labeled \
+    --modalities MG US \
+    --batch-size 128
+
+echo "extraction done"

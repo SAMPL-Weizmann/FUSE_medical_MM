@@ -1,0 +1,46 @@
+# =============================================================================
+# FUSE_medical_MM — data configuration
+# This is the SINGLE place to edit dataset paths, the label scheme, and the
+# Labeled / Unlabeled / Test split. Nothing else hard-codes these values.
+# =============================================================================
+
+# --- Dataset root on the clinical drive (read-only network share) ------------
+# Patient .npy folders live under <root>/<mg_subdir> and <root>/<us_subdir>.
+#
+# Paths below are the Windows (mapped-drive) defaults. To run on WEXAC (Linux)
+# WITHOUT editing this file, export the Linux mount paths as env vars:
+#   FUSE_DATASET_ROOT, FUSE_LABEL_TABLE  (also: FUSE_MG_SUBDIR, FUSE_US_SUBDIR,
+#   FUSE_SPLITS_PATH, FUSE_FEATURES_DIR). See scripts/wexac/env.sh.
+dataset:
+  root: "Z:/Studies_under_Helsinki_approval/Beilinson_Multi_Modality_Dr_Ahuva_Grubstein/Data/final Data adi project/FINAL DATA/MG & US"
+  mg_subdir: "MG_CLEAN_NPY"
+  us_subdir: "US_CLEAN_NPY"
+  # Paired label table (maps MG id <-> US id <-> Label, same patient per row).
+  label_table: "Z:/Studies_under_Helsinki_approval/Beilinson_Multi_Modality_Dr_Ahuva_Grubstein/Data/final Data adi project/FINAL TABLES/Tables - Useful/clean_mm.xlsx"
+
+# --- Label scheme ------------------------------------------------------------
+# Native table labels: 0 = normal (takin), 1 = benign (shafir), 2 = malignant (BC)
+# scheme options:
+#   "binary_abnormal"  -> {0}->0 (normal), {1,2}->1 (abnormal)   [ACTIVE]
+#   "binary_malignant" -> drop 0, {1}->0 (benign), {2}->1 (malignant)
+#   "multiclass"       -> keep 0/1/2 as-is
+labels:
+  scheme: "binary_abnormal"
+  class_names: ["normal", "abnormal"]
+
+# --- Split: Labeled / Unlabeled / Test --------------------------------------
+# Patient-level, stratified by label, on the PAIRED cohort (both MG & US on disk).
+# Change `ratios` to re-balance the three sets (must sum to 1.0). Task 3.
+split:
+  ratios:
+    labeled:   0.10   # small: train classifier heads on frozen backbones
+    unlabeled: 0.80   # large: FUSE estimation / TCI
+    test:      0.10   # small: frozen verifiers, one patient at a time
+  seed: 42
+  # require that a patient has BOTH MG and US folders present on disk
+  require_both_modalities: true
+
+# --- Outputs -----------------------------------------------------------------
+artifacts:
+  splits_path: "artifacts/splits.json"
+  features_dir: "artifacts/features"

@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-linux/
+venv/
+*.egg-info/
+
+# Artifacts (data-derived; reproducible from configs + drive)
+artifacts/
+*.npy
+*.pt
+
+# Cluster job logs (training/run output)
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
