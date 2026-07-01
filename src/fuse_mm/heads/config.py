@@ -29,8 +29,13 @@ def load_train_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
 
 
 def run_tag(cfg: dict[str, Any]) -> str:
-    """Stable id for this experiment combo, e.g. 'per_patient_linear'."""
-    return f"{cfg['aggregation']['mode']}_{cfg['head']['type']}"
+    """Stable id for this experiment combo, e.g. 'per_patient_linear' or
+    'per_patient_linear_ncl2' when multiple decorrelated outputs are used."""
+    tag = f"{cfg['aggregation']['mode']}_{cfg['head']['type']}"
+    n_out = int(cfg["head"].get("n_outputs", 1))
+    if n_out > 1:
+        tag += f"_ncl{n_out}"
+    return tag
 
 
 def _validate(cfg: dict[str, Any]) -> None:

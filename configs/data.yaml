@@ -18,6 +18,24 @@ dataset:
   # Paired label table (maps MG id <-> US id <-> Label, same patient per row).
   label_table: "Z:/Studies_under_Helsinki_approval/Beilinson_Multi_Modality_Dr_Ahuva_Grubstein/Data/final Data adi project/FINAL TABLES/Tables - Useful/clean_mm.xlsx"
 
+# --- Per-patient scan selection (fixed counts; mirrors the prior team) -------
+# Reduces each patient to a fixed set of scans so unequal scan counts (which
+# correlate with the label, esp. US) cannot leak. Set a mode to "all" to revert
+# to using every image and pooling.
+selection:
+  mg:
+    mode: "canonical_views"     # all | canonical_views
+    # 4 standard views, finding-side (default Left unless finding side == 'RT'),
+    # one .npy taken per view folder. require_all_views drops patients missing them.
+    views: ["CC C-View", "CC Tomosynthesis Projection", "MLO C-View", "MLO Tomosynthesis Projection"]
+    require_all_views: true
+  us:
+    mode: "k_frames"            # all | k_frames
+    k: 1                        # frames per patient
+    strategy: "first"          # first | evenly | random  (pick k of available)
+    pad: "repeat"              # repeat | none   (when a patient has < k frames)
+    seed: 42
+
 # --- Label scheme ------------------------------------------------------------
 # Native table labels: 0 = normal (takin), 1 = benign (shafir), 2 = malignant (BC)
 # scheme options:

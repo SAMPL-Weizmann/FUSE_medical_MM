@@ -19,7 +19,6 @@ from typing import Any
 
 import numpy as np
 
-from ..dataset import PatientLoader
 from ..labels import PatientRecord
 from .backbones import BackboneSpec, build_extractor
 
@@ -38,6 +37,8 @@ def _records_from_split(cfg: dict[str, Any], split: dict[str, Any],
             raw_label=p["raw_label"], group="",
             mg_dir=mg if mg.is_dir() else None,
             us_dir=us if us.is_dir() else None,
+            mg_finding_side=p.get("mg_finding_side", ""),
+            us_finding_side=p.get("us_finding_side", ""),
         ))
     return recs
 
@@ -47,6 +48,9 @@ def extract_split_modality(cfg, split, set_name: str, modality: str,
                            batch_size: int = 32) -> Path:
     import torch
     from PIL import Image
+
+    from ..dataset import load_image
+    from ..selection import select_npys
 
     ex = build_extractor(spec, device)
     transform, feat_dim = ex.transform, ex.feat_dim
@@ -70,12 +74,13 @@ def extract_split_modality(cfg, split, set_name: str, modality: str,
         batch.clear(); meta.clear()
 
     for rec in records:
-        pdir = rec.mg_dir if modality == "MG" else rec.us_dir
         pid = rec.mg_id if modality == "MG" else rec.us_id
-        if pdir is None:
+        files = select_npys(rec.mg_dir, rec.us_dir,
+                            rec.mg_finding_side, rec.us_finding_side, modality, cfg)
+        if not files:
             continue
-        loader = PatientLoader(pdir, modality)
-        for fp, img in zip(loader.files, loader.images()):
+        for fp in files:
+            img = load_image(fp)
             tensor = transform(Image.fromarray(img))   # (3, H, W)
             batch.append(tensor)
             meta.append((pid, rec.label, str(fp)))

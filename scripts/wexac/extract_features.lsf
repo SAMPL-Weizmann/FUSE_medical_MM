@@ -24,9 +24,12 @@ source scripts/wexac/activate.sh       # module load miniconda + conda activate
 source scripts/wexac/env.sh            # FUSE_* dataset paths + HF cache
 
 # --- run --------------------------------------------------------------------
+# Sets default to all three (FUSE needs L_CE on S_L, L_TCI on S_U, inference on Test),
+# all under the same selection. Override with e.g.  SETS=unlabeled bsub < ...
+SETS="${SETS:-labeled unlabeled test}"
 # A40 (~49GB): batch 128 is comfortable even for the 518px ViTs. Bump if needed.
 python -u scripts/02_extract_features.py \
-    --sets labeled \
+    --sets $SETS \
     --modalities MG US \
     --batch-size 128
 

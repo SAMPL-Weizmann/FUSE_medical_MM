@@ -73,7 +73,9 @@ def _serialize(cfg, cohort, assignment) -> dict[str, Any]:
     def pack(records: list[PatientRecord]) -> list[dict[str, Any]]:
         return [
             {"mg_id": r.mg_id, "us_id": r.us_id,
-             "label": r.label, "raw_label": r.raw_label}
+             "label": r.label, "raw_label": r.raw_label,
+             "mg_finding_side": r.mg_finding_side,
+             "us_finding_side": r.us_finding_side}
             for r in sorted(records, key=lambda r: r.mg_id)
         ]
 

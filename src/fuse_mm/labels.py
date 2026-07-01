@@ -23,6 +23,8 @@ _COL_MG = "MG"
 _COL_US = "US"
 _COL_LABEL = "Label"
 _COL_GROUP = "Group"
+_COL_MG_SIDE = "MG finding side"
+_COL_US_SIDE = "US finding side"
 
 
 # --------------------------------------------------------------------------- #
@@ -105,6 +107,8 @@ class PatientRecord:
     group: str            # original Train/Validation/Test tag (informational)
     mg_dir: Path | None   # on-disk MG folder, or None if missing
     us_dir: Path | None   # on-disk US folder, or None if missing
+    mg_finding_side: str = ""   # 'LT'/'RT'/'ALL'/... drives MG view selection
+    us_finding_side: str = ""
 
     @property
     def has_mg(self) -> bool:
@@ -143,21 +147,32 @@ def read_label_table(cfg: dict[str, Any]) -> list[PatientRecord]:
                 group=row.get(_COL_GROUP, ""),
                 mg_dir=mg_dir if mg_dir.is_dir() else None,
                 us_dir=us_dir if us_dir.is_dir() else None,
+                mg_finding_side=row.get(_COL_MG_SIDE, ""),
+                us_finding_side=row.get(_COL_US_SIDE, ""),
             )
         )
     return records
 
 
 def build_cohort(cfg: dict[str, Any]) -> list[PatientRecord]:
-    """Records usable for the split: present on disk per require_both_modalities."""
+    """Records usable for the split.
+
+    A patient must be present on disk (per require_both_modalities) AND pass the
+    scan-selection check — e.g. with selection.mg.mode == canonical_views +
+    require_all_views, patients missing the 4 MG views are dropped (this is the
+    same culling the prior team did).
+    """
+    from .selection import is_valid  # local import avoids cycle at module load
+
     require_both = cfg["split"].get("require_both_modalities", True)
     out: list[PatientRecord] = []
     for r in read_label_table(cfg):
-        if require_both:
-            if r.has_mg and r.has_us:
-                out.append(r)
-        elif r.has_mg or r.has_us:
-            out.append(r)
+        present = (r.has_mg and r.has_us) if require_both else (r.has_mg or r.has_us)
+        if not present:
+            continue
+        if not is_valid(r, cfg):
+            continue
+        out.append(r)
     return out
 
 

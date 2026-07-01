@@ -22,11 +22,18 @@ aggregation:
 # type: linear -> logistic-regression probe (no hidden layers)
 #       mlp    -> hidden layers given by mlp_layers (1-2 entries recommended)
 head:
-  type: "linear"              # linear | mlp
+  type: "mlp"              # linear | mlp
   mlp_layers: [256]           # used only when type == mlp
   dropout: 0.1                # used only when type == mlp
   standardize: true           # z-score features (fit on train fold only)
   class_weight: "balanced"    # balanced | none  (handles label imbalance)
+  # Negative-Correlation-Learning: emit n_outputs answers for the SAME label and
+  # penalize the correlation between their scores over the batch (output-space,
+  # cosine of centered scores = Pearson r). n_outputs=1 -> today's single head.
+  n_outputs: 2                # 1 = single head; 2 = decorrelated pair (NCL)
+  decorrelation:
+    weight: 0.1               # lambda; 0 disables the penalty
+    on: "logit"              # logit | prob  (which score to decorrelate)
   epochs: 200
   lr: 0.001
   weight_decay: 0.0001

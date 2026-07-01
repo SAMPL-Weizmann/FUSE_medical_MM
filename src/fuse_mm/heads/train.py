@@ -21,17 +21,27 @@ from .metrics import (
 from .models import train_head
 
 
+def _answer_correlation(oof: np.ndarray) -> float | None:
+    """Mean pairwise |Pearson r| between the answers' OOF predictions."""
+    if oof.shape[1] < 2:
+        return None
+    c = np.corrcoef(oof.T)
+    iu = np.triu_indices(oof.shape[1], k=1)
+    return float(np.mean(np.abs(c[iu])))
+
+
 def run_cv(cfg, modality: str, backbone: str, device: str = "cpu") -> dict:
     fs = FeatureSet.load(cfg["io"]["features_dir"],
                          cfg["experiment"]["feature_set"], modality, backbone)
     mode = cfg["aggregation"]["mode"]
     head = cfg["head"]
+    n_out = int(head.get("n_outputs", 1))
 
     patients, y_pat = fs.patients, fs.y_patient
     folds = stratified_kfold(y_pat, cfg["cv"]["folds"], cfg["cv"]["seed"])
 
-    oof = np.full(len(patients), np.nan, dtype=np.float64)
-    fold_metrics = []
+    oof = np.full((len(patients), n_out), np.nan, dtype=np.float64)
+    fold_metrics = []   # ensemble (mean over answers) metrics, per fold
 
     for tr, va in folds:
         tr_pat, va_pat = patients[tr], patients[va]
@@ -43,35 +53,43 @@ def run_cv(cfg, modality: str, backbone: str, device: str = "cpu") -> dict:
                 mu, sd = standardize_fit(Xtr)
                 Xtr, Xva = standardize_apply(Xtr, mu, sd), standardize_apply(Xva, mu, sd)
             predict = train_head(Xtr, ytr, head, fs.n_classes, device)
-            prob_va = predict(Xva)[:, 1]
+            prob_va = predict(Xva)                      # (n_va, n_out)
         else:  # per_image: train on images, pool probs per val patient
             Xtr_img, ytr_img, _ = fs.images_of(tr_pat)
             if head["standardize"]:
                 mu, sd = standardize_fit(Xtr_img)
                 Xtr_img = standardize_apply(Xtr_img, mu, sd)
             predict = train_head(Xtr_img, ytr_img, head, fs.n_classes, device)
-            prob_va = np.empty(len(va_pat))
+            prob_va = np.empty((len(va_pat), n_out))
             for k, p in enumerate(va_pat):
                 Xp = fs.X[fs.image_indices(p)]
                 if head["standardize"]:
                     Xp = standardize_apply(Xp, mu, sd)
-                prob_va[k] = predict(Xp)[:, 1].mean()
+                prob_va[k] = predict(Xp).mean(axis=0)   # pool images per answer
 
         oof[va] = prob_va
-        fold_metrics.append(binary_metrics(y_pat[va], prob_va))
+        fold_metrics.append(binary_metrics(y_pat[va], prob_va.mean(axis=1)))
+
+    # full out-of-fold analytics
+    answers = [binary_metrics(y_pat, oof[:, a]) for a in range(n_out)]
+    ensemble = binary_metrics(y_pat, oof.mean(axis=1))
 
     summary = {
         "modality": modality,
         "backbone": backbone,
         "aggregation": mode,
         "head_type": head["type"],
+        "n_outputs": n_out,
         "feat_dim": int(fs.feat_dim),
         "n_patients": int(len(patients)),
         "label_distribution": {int(c): int(n)
                                for c, n in zip(*np.unique(y_pat, return_counts=True))},
-        "folds": fold_metrics,
+        "folds": fold_metrics,                          # ensemble, per fold
         "mean": {k: float(np.mean([m[k] for m in fold_metrics])) for k in fold_metrics[0]},
         "std": {k: float(np.std([m[k] for m in fold_metrics])) for k in fold_metrics[0]},
+        "ensemble_oof": ensemble,
+        "answers_oof": answers,
+        "answer_correlation": _answer_correlation(oof),
     }
 
     _save(cfg, modality, backbone, summary, patients, y_pat, oof)
@@ -85,5 +103,5 @@ def _save(cfg, modality, backbone, summary, patients, y_pat, oof):
         json.dump(summary, f, indent=2)
     np.savez_compressed(
         out_dir / f"{backbone}_oof.npz",
-        patient_ids=patients, y_true=y_pat, oof_prob=oof,
+        patient_ids=patients, y_true=y_pat, oof_prob=oof,   # (n_patients, n_out)
     )

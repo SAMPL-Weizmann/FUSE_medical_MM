@@ -1,0 +1,25 @@
+#!/bin/bash
+# LSF job: FUSE stage-1 joint verifier training. Tiny (linear heads on frozen
+# features) -> CPU queue. Needs labeled+unlabeled+test features already extracted.
+#   bsub < scripts/wexac/train_fuse.lsf
+
+#BSUB -J fuse_train
+#BSUB -q waic-short                    # CPU queue (change if your cluster differs)
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 1:00
+#BSUB -o logs/fuse_train.%J.out
+#BSUB -e logs/fuse_train.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh       # module load miniconda + conda activate
+source scripts/wexac/env.sh            # FUSE_* paths
+
+CONFIG="${CONFIG:-configs/fuse.yaml}"
+python -u scripts/04_train_fuse.py --config "$CONFIG" --device cpu
+
+echo "fuse stage-1 done"

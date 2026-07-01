@@ -64,7 +64,7 @@ def annotation_only_cv(X, y, seed=42, folds=5):
     for tr, va in stratified_kfold(y, folds, seed):
         mu, sd = standardize_fit(X[tr])
         predict = train_head(standardize_apply(X[tr], mu, sd), y[tr], cfg_head, 2)
-        oof[va] = predict(standardize_apply(X[va], mu, sd))[:, 1]
+        oof[va] = predict(standardize_apply(X[va], mu, sd))[:, 0]  # single answer col
     return oof
 
 

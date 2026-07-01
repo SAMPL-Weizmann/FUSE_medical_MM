@@ -51,9 +51,14 @@ def main() -> None:
             s = run_cv(cfg, modality, bb, device=args.device)
             m, sd = s["mean"], s["std"]
             rows.append((modality, bb, m, sd))
-            print(f"{modality:3s} {bb:20s}  "
-                  f"AUC={m['auc']:.3f}±{sd['auc']:.3f}  "
-                  f"AP={m['ap']:.3f}  bACC={m['balanced_acc']:.3f}  F1={m['f1']:.3f}")
+            line = (f"{modality:3s} {bb:20s}  "
+                    f"AUC={m['auc']:.3f}±{sd['auc']:.3f}  "
+                    f"AP={m['ap']:.3f}  bACC={m['balanced_acc']:.3f}  F1={m['f1']:.3f}")
+            if s.get("answer_correlation") is not None:      # NCL: show the pair
+                aucs = "/".join(f"{a['auc']:.3f}" for a in s["answers_oof"])
+                line += (f"  | answers AUC={aucs}  corr={s['answer_correlation']:.2f}"
+                         f"  ens={s['ensemble_oof']['auc']:.3f}")
+            print(line)
 
     # combined summary table sorted by AUC within modality
     summary_path = Path(cfg["io"]["results_dir"]) / tag / "summary.json"
