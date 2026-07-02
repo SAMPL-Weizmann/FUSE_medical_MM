@@ -22,9 +22,13 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--lambda", dest="lam", type=float, default=None,
+                    help="override train.lambda_tci (for sweeps); output keyed by it")
     args = ap.parse_args()
 
     cfg = load_fuse_config(args.config)
+    if args.lam is not None:
+        cfg["train"]["lambda_tci"] = args.lam
     print("=" * 68)
     print("FUSE stage-1 joint training")
     print(f"  warm={cfg['train']['warmstart_epochs']} joint={cfg['train']['joint_epochs']} "

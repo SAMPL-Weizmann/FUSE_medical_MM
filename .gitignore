@@ -14,6 +14,9 @@ artifacts/
 # Cluster job logs (training/run output)
 logs/
 
+# Vendored external repos (e.g. metal-ama for Weaver)
+external/
+
 # OS / editor
 .DS_Store
 Thumbs.db

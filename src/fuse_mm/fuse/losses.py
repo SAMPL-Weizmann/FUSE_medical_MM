@@ -47,8 +47,8 @@ def tci_loss(v, eps: float):
     a, b = iu[0], iu[1]
     Rp = R[a, b, :]                                     # (P, m): each pair's ratio per c
     cs = torch.arange(m, device=v.device)
-    valid = (a.unsqueeze(1) != cs) & (b.unsqueeze(1) != cs)     # (P, m): exclude c in {a,b}
-    valid = valid.to(Rp.dtype)
+    # paper convention (Prop 2.4, eq 4): for each c, pairs with 1 <= a < b < c
+    valid = (b.unsqueeze(1) < cs).to(Rp.dtype)                  # (P, m)
 
     cnt = valid.sum(dim=0).clamp_min(1.0)               # pairs per c
     mean = (Rp * valid).sum(dim=0) / cnt

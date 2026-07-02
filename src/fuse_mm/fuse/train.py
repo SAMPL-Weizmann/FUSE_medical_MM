@@ -20,6 +20,10 @@ from .model import FuseVerifiers
 def train_fuse(cfg, device: str = "cpu", verbose: bool = True) -> dict:
     import torch
 
+    # fixed seed so a lambda-sweep varies only lambda, not weight init / shuffling
+    torch.manual_seed(0)
+    np.random.seed(0)
+
     feats_dir = cfg["io"]["features_dir"]
     split = load_splits(load_config())
     verifiers = resolve_verifiers(cfg, feats_dir)
@@ -103,7 +107,8 @@ def train_fuse(cfg, device: str = "cpu", verbose: bool = True) -> dict:
 def _finalize(cfg, model, scalers, verifiers, names, sets, history, device):
     import torch
 
-    out = Path(cfg["io"]["out_dir"])
+    # key by lambda so lambda=0 (baseline) and lambda!=0 (TCI) runs coexist
+    out = Path(cfg["io"]["out_dir"]) / f"lambda_{cfg['train']['lambda_tci']}"
     out.mkdir(parents=True, exist_ok=True)
 
     for set_name, (v, y, pid) in sets.items():

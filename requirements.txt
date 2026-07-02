@@ -19,3 +19,7 @@ tqdm>=4.66
 #   transformers    -> RAD-DINO
 open_clip_torch>=2.24
 transformers>=4.40
+
+# Benchmark reporting (scripts/08_report.py)
+matplotlib>=3.8
+# scikit-learn is pulled in by metal-ama (Weaver); see scripts/wexac/setup_weaver.sh

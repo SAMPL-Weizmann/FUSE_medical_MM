@@ -1,0 +1,24 @@
+#!/bin/bash
+# LSF job: run the benchmark suite on a verifier-scores dir. CPU only.
+#   SCORES=artifacts/fuse/lambda_0.0 bsub < scripts/wexac/benchmark.lsf
+
+#BSUB -J fuse_bench
+#BSUB -q waic-short
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 1:00
+#BSUB -o logs/bench.%J.out
+#BSUB -e logs/bench.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+SCORES="${SCORES:-artifacts/fuse/lambda_0.0}"
+python -u scripts/05_benchmark.py "$SCORES"
+
+echo "benchmark done"

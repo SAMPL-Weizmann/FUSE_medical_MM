@@ -29,7 +29,7 @@ T_{a,b,c} / Σ_{a,b} = κ · q_c      ← constant over (a,b) for fixed c
 ```
 
 ### L_TCI (on `S_U`, minimized over heads)
-For each `c`, over **all pairs `(a,b)` with `a<b`, `a≠c`, `b≠c`** (decision 1):
+Paper convention (Candès et al., Prop 2.4 / eq 4): for each `c`, over pairs `1 ≤ a < b < c`:
 ```
 r_{a,b,c} = T_{a,b,c} / denom(Σ_{a,b}),   denom = sign(Σ)·max(|Σ|, ε)   # ε-floor, decision 5
 L_TCI     = Σ_{c=1}^{m}  Var_{(a,b)}( r_{a,b,c} )
@@ -55,9 +55,18 @@ L = L_CE(S_L)  +  α · L_NCL(S_L)  +  λ · L_TCI(S_U)
 
 ## Pipeline
 1. **Train** (`S_L` + `S_U`): joint loss above → learn heads.
-2. **Estimate** (`S_U`): freeze; estimate `Σ, T` → per-verifier sensitivity/specificity
-   (from the rank-1 `q`, sign/scale anchored by `S_L`/Test), class prior, posterior
-   `P(Y|v)`; fit the combined predictor (CI likelihood / weighted ensemble).
+2. **Estimate** (`S_U`) — Method of Moments (Jaffe et al. 2015, Thm 2.3):
+   - `μ = E[v]`; `Σ, T` = 2nd/3rd marginal moments over S_U.
+   - Rank-1 factor `Σ_offdiag = u uᵀ`, `u = √(1−b²)(2π−1)`; sign fixed by Assumption 2.1
+     (majority of verifiers better than random → most `2π−1 > 0`).
+   - `T_offdiag = w⊗w⊗w`, `w = (−2b(1−b²))^{1/3}(2π−1)`; ratio `w/u` (const) → class
+     imbalance `b`; then balanced accuracies `π` from `u`.
+   - Sensitivity/specificity (eq 3): `ψ = ½(1+μ+u√((1−b)/(1+b)))`,
+     `η = ½(1−μ+u√((1−b)/(1+b)))`.
+   - Posterior (Prop C.1, eq 13): per triplet `P(y|v_{j1},v_{j2},v_{j3}) ∝ (1+by)∏[…]`,
+     averaged over all `C(m,3)` triplets → `p̂(r)`.
+   - Predictor: naive-Bayes MLE `ŷ = sign(Σ_j v_j·log(ψ_j(1−ψ_j)/(η_j(1−η_j))) + …)`,
+     or the fitted predictor maximizing estimated accuracy (paper p8).
 3. **Infer** (Test, inductive, one patient): apply frozen verifiers → posterior → predict + uncertainty.
 
 ## Confirmed decisions
@@ -70,6 +79,15 @@ L = L_CE(S_L)  +  α · L_NCL(S_L)  +  λ · L_TCI(S_U)
 5. ε-floor `|Σ_{a,b}|`; do not drop pairs.
 6. Warm-start from CE-trained heads, then joint with `L_TCI`.
 
-## Open items to confirm with supervisor
-- Exact `1≤a<b<c` vs "all pairs ≠ c" (we use the latter).
-- Estimator specifics in stage 2 (how `q` → sens/spec and the predictor form).
+## Resolved from the FUSE paper (Candès et al. / Jaffe et al. 2015)
+- Loss convention: **`1 ≤ a < b < c`** (Prop 2.4) — implemented.
+- Stage-2 estimator: **Method of Moments** as above (Thm 2.3, Prop C.1) — to build.
+
+## Remaining adaptation nuance
+- **Binary vs continuous verifiers.** The paper's Step-1 *binarizes* verifier scores via
+  thresholds `g_τ → {±1}`, minimizing TCI over `τ`; Thm 2.3 / posterior assume ±1 outputs.
+  Our (supervisor's) adaptation instead **trains the heads** to minimize TCI and keeps
+  `v ∈ [0,1]`. For stage-2 we therefore either (a) binarize `v → ±1` before MoM, or
+  (b) use the soft `2v−1 ∈ [−1,1]` moments (ψ/η become generalized conditional means).
+  Confirm with supervisor. Also: `b` and the Assumption-2.1 sign can be **anchored by
+  S_L labels** (we have them) for robustness, rather than recovered purely unsupervised.

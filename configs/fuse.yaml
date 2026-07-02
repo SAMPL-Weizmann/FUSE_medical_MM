@@ -22,8 +22,12 @@ train:
   joint_epochs: 500          # add lambda*L_TCI on S_U
   lr: 0.001
   weight_decay: 0.0001
-  alpha_ncl: 0.1             # gentle (marginal); just breaks the twin-collapse
-  lambda_tci: 1.0            # the real diversity force (conditional, on S_U)
+  # alpha_ncl was 0.1 -> twins collapsed (corr~0.98) because CE pulls the two
+  # accurate answers to corr=1 (a zero-gradient saddle of the NCL penalty). Push
+  # it hard so NCL dominates from epoch 0 and the twins never reach that saddle.
+  # NCL is already active during warm-start (warm phase = CE + alpha*NCL).
+  alpha_ncl: 3.0             # strong; sweep 2-5 if answer-pair corr stays high
+  lambda_tci: 1.0           # the real diversity force (conditional, on S_U)
   tci_eps: 0.05              # epsilon-floor on |Sigma_ab| in the TCI denominator
   log_every: 50
 

@@ -1,0 +1,32 @@
+#!/bin/bash
+# LSF job: sweep lambda_tci. For each value, train FUSE stage-1 (-> lambda_X/)
+# then benchmark it. CPU only. Override the values with LAMBDAS="...".
+#   LAMBDAS="0.0 0.1 0.3 0.5 1.0" bsub < scripts/wexac/sweep.lsf
+
+#BSUB -J fuse_sweep
+#BSUB -q waic-short
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 4:00
+#BSUB -o logs/sweep.%J.out
+#BSUB -e logs/sweep.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+LAMBDAS="${LAMBDAS:-0.0 0.1 0.3 0.5 1.0}"
+echo "sweeping lambda over: $LAMBDAS"
+for lam in $LAMBDAS; do
+  echo "======== lambda=$lam ========"
+  python -u scripts/04_train_fuse.py --lambda "$lam" --device cpu
+  python -u scripts/05_benchmark.py "artifacts/fuse/lambda_${lam}"
+done
+
+echo "=== sweep curve ==="
+python -u scripts/07_collect_sweep.py
+echo "sweep done"
