@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..fuse.estimate import fit_mom, params_from_labels, posterior_triplet_avg
+from ..fuse.estimate import (
+    apply_g_tau, fit_mom, optimize_ensemble as _opt_ensemble, params_from_labels,
+    posterior_triplet_avg, predict_ensemble, search_g_tau,
+)
 from .metrics import _sens_spec
 
 TRAIN = "labeled"
@@ -28,9 +31,42 @@ def naive_ensemble(V, Y=None):
     return {s: Vs.mean(axis=1) for s, Vs in V.items()}
 
 
-def fuse(V, Y=None, est_set=EST):
-    params = fit_mom(V[est_set])                     # MoM on S_U, unsupervised
-    return {s: posterior_triplet_avg(Vs, params) for s, Vs in V.items()}
+def fuse(V, Y=None, est_set=EST, binarize=False, optimize_ensemble=False):
+    """FUSE (Algorithm 1). Two optional flags:
+      binarize          : steps 2-3, apply g_tau* (per-verifier thresholds that
+                          minimize empirical TCI) -> binary V~ before the MoM.
+      optimize_ensemble : steps 5-7, fit a logistic f_theta on the FUSE posterior
+                          (eq. 7) and predict with it instead of the raw posterior.
+    Both use no labels -> all four combinations are fully unsupervised.
+    """
+    est = V[est_set]
+    tau = search_g_tau(est) if binarize else None
+    if binarize:
+        est = apply_g_tau(est, tau)
+    params = fit_mom(est)                                    # Thm 2.3 (step 4)
+
+    phat = {}
+    for s, Vs in V.items():
+        Vs_e = apply_g_tau(Vs, tau) if binarize else Vs
+        phat[s] = posterior_triplet_avg(Vs_e, params)        # eq. 9
+    if not optimize_ensemble:
+        return phat
+
+    # f_theta is fit on / applied to the ORIGINAL (soft) V (eq. 7), not V~
+    w, b = _opt_ensemble(V[est_set], phat[est_set])
+    return {s: predict_ensemble(Vs, w, b) for s, Vs in V.items()}
+
+
+def fuse_bin(V, Y=None):        # step 2-3 only
+    return fuse(V, Y, binarize=True)
+
+
+def fuse_ens(V, Y=None):        # step 5-7 only
+    return fuse(V, Y, optimize_ensemble=True)
+
+
+def fuse_full(V, Y=None):       # full Algorithm 1
+    return fuse(V, Y, binarize=True, optimize_ensemble=True)
 
 
 # ---- supervised ------------------------------------------------------------ #
@@ -107,6 +143,8 @@ def weaver(V, Y, train_set=TRAIN):
         raise NotImplementedError(f"weaver: metal-ama not installed ({e})")
 
 
-UNSUPERVISED = {"majority_vote": majority_vote, "naive_ensemble": naive_ensemble, "fuse": fuse}
+UNSUPERVISED = {"majority_vote": majority_vote, "naive_ensemble": naive_ensemble,
+                "fuse": fuse, "fuse_bin": fuse_bin, "fuse_ens": fuse_ens,
+                "fuse_full": fuse_full}
 SUPERVISED = {"obv": obv, "logistic": logistic, "gaussian_nb": gaussian_nb, "weaver": weaver}
 CEILING = {"oracle": oracle}

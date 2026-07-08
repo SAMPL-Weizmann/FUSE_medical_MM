@@ -22,3 +22,6 @@ external/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local backup of results (data, not code)
+Backup of the original fold/

@@ -17,22 +17,18 @@ from .losses import ce_loss, ncl_loss, tci_loss
 from .model import FuseVerifiers
 
 
-def train_fuse(cfg, device: str = "cpu", verbose: bool = True) -> dict:
+def fit_and_score(banks, ys, pids, cfg, device: str = "cpu", verbose: bool = True):
+    """Train the verifiers on pre-built banks and return their scores per set.
+
+    banks/ys/pids: dicts keyed "L"/"U"/"T" -> {vkey: (n, dim)} / (n,) / (n,).
+    Returns (scores, names, model, scalers, history) where
+        scores = {"labeled": (v, y, pid), "unlabeled": ..., "test": ...}.
+    No disk I/O -> reusable by the single split and by CV folds.
+    """
     import torch
 
-    # fixed seed so a lambda-sweep varies only lambda, not weight init / shuffling
     torch.manual_seed(0)
     np.random.seed(0)
-
-    feats_dir = cfg["io"]["features_dir"]
-    split = load_splits(load_config())
-    verifiers = resolve_verifiers(cfg, feats_dir)
-
-    banks, ys, pids = {}, {}, {}
-    for key, set_name in [("L", cfg["io"]["labeled_set"]),
-                          ("U", cfg["io"]["unlabeled_set"]),
-                          ("T", cfg["io"]["test_set"])]:
-        banks[key], ys[key], pids[key] = build_bank(feats_dir, split, set_name, verifiers)
 
     # standardize each verifier, fit on S_L, apply to all
     scalers = {}
@@ -87,21 +83,30 @@ def train_fuse(cfg, device: str = "cpu", verbose: bool = True) -> dict:
             history.append({"epoch": epoch, "ce": float(l_ce), "ncl": float(l_ncl),
                             "tci": float(l_tci)})
 
-    # final verifier scores
     model.eval()
     def scores(t):
         with torch.no_grad():
             _, v = model(t)
         return v.reshape(v.shape[0], -1).cpu().numpy()
-    vL, vU, vT = scores(tL), scores(tU), scores(tT)
-    names = model.flat_verifier_names()
+    out = {"labeled": (scores(tL), ys["L"], pids["L"]),
+           "unlabeled": (scores(tU), ys["U"], pids["U"]),
+           "test": (scores(tT), ys["T"], pids["T"])}
+    return out, model.flat_verifier_names(), model, scalers, history
 
-    summary = _finalize(cfg, model, scalers, verifiers, names,
-                        {"labeled": (vL, ys["L"], pids["L"]),
-                         "unlabeled": (vU, ys["U"], pids["U"]),
-                         "test": (vT, ys["T"], pids["T"])},
-                        history, device)
-    return summary
+
+def train_fuse(cfg, device: str = "cpu", verbose: bool = True) -> dict:
+    feats_dir = cfg["io"]["features_dir"]
+    split = load_splits(load_config())
+    verifiers = resolve_verifiers(cfg, feats_dir)
+
+    banks, ys, pids = {}, {}, {}
+    for key, set_name in [("L", cfg["io"]["labeled_set"]),
+                          ("U", cfg["io"]["unlabeled_set"]),
+                          ("T", cfg["io"]["test_set"])]:
+        banks[key], ys[key], pids[key] = build_bank(feats_dir, split, set_name, verifiers)
+
+    sets, names, model, scalers, history = fit_and_score(banks, ys, pids, cfg, device, verbose)
+    return _finalize(cfg, model, scalers, verifiers, names, sets, history, device)
 
 
 def _finalize(cfg, model, scalers, verifiers, names, sets, history, device):

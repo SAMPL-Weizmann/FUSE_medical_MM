@@ -1,0 +1,44 @@
+#!/bin/bash
+# LSF job: cross-validate the full FUSE pipeline. CPU only, but heavy
+# (folds x lambdas full retrains). Override lambdas with LAMBDAS="...".
+#
+# Fan-out (one job per lambda, parallel) — REQUIRED PREP so jobs don't race
+# on cv_folds.json or clobber each other's output:
+#   1) pre-generate the folds once on the login node:
+#        python -c "import sys; sys.path.insert(0,'src'); \
+#                   from fuse_mm.cv import make_cv_folds; make_cv_folds()"
+#   2) submit one job per lambda (each writes reports/cv/lambda_<L>/):
+#        for L in 0 0.1 0.2 0.3 0.5 1; do LAMBDAS="$L" bsub < scripts/wexac/cv.lsf; done
+#   3) after all finish, merge into one report:
+#        python scripts/13_cv_merge.py
+#
+# Single-job mode (all lambdas, one combined file): LAMBDAS="0 0.1 0.2 0.3 0.5 1".
+
+# 12_cv.py is a single Python process, so 1 slot is all it uses. Asking for -n 4
+# + span[hosts=1] + 16GB/task = one host with 4 free cores AND 64GB free, which
+# rarely exists in a busy queue -> "not enough processor units" PEND forever.
+#BSUB -J fuse_cv
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/cv.%J.out
+#BSUB -e logs/cv.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+# 1 bound core -> keep BLAS/torch single-threaded (no oversubscription on it).
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"
+# One out dir per job so parallel single-lambda jobs never clobber each other.
+# Sanitize spaces (single-lambda -> "lambda_0.3"; all-lambdas -> "lambda_0_0.1_...").
+OUT_DIR="artifacts/reports/cv/lambda_${LAMBDAS// /_}"
+python -u scripts/12_cv.py --lambdas $LAMBDAS --device cpu --out-dir "$OUT_DIR"
+
+echo "cv done -> $OUT_DIR"

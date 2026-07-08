@@ -144,3 +144,91 @@ def posterior_triplet_avg(V: np.ndarray, params: dict) -> np.ndarray:
         acc += 1.0 / (1.0 + np.exp(-(L1 - Ln)))   # sigmoid(L1-Ln)
         n_trip += 1
     return acc / max(n_trip, 1)
+
+
+# --------------------------------------------------------------------------- #
+# Algorithm 1, steps 2-3: g_tau binary transformation (numpy TCI + search)     #
+# --------------------------------------------------------------------------- #
+def tci_violation(V: np.ndarray, eps: float = 0.05) -> float:
+    """Empirical TCI violation Ŝ (numpy mirror of fuse.losses.tci_loss)."""
+    n, m = V.shape
+    uc = (2.0 * V - 1.0)
+    uc = uc - uc.mean(axis=0)
+    Sigma = (uc.T @ uc) / n
+    T = np.einsum("xa,xb,xc->abc", uc, uc, uc) / n
+    sign = np.sign(Sigma)
+    sign[sign == 0] = 1.0
+    denom = sign * np.maximum(np.abs(Sigma), eps)
+    R = T / denom[:, :, None]
+    total = 0.0
+    for c in range(m):
+        vals = [R[a, b, c] for a in range(c) for b in range(a + 1, c)]
+        if len(vals) >= 2:
+            total += float(np.var(vals))
+    return total
+
+
+def search_g_tau(V: np.ndarray, eps: float = 0.05, n_grid: int = 7,
+                 passes: int = 2, max_n: int = 600, seed: int = 0) -> np.ndarray:
+    """Per-verifier coordinate descent for τ* = argmin_τ Ŝ(g_τ(V)).
+    Returns per-verifier thresholds. Subsamples rows for speed."""
+    n, m = V.shape
+    Vs = V
+    if n > max_n:
+        idx = np.random.default_rng(seed).choice(n, max_n, replace=False)
+        Vs = V[idx]
+    qs = np.linspace(0.15, 0.85, n_grid)
+    cand = [np.quantile(Vs[:, j], qs) for j in range(m)]
+    tau = np.array([np.median(Vs[:, j]) for j in range(m)], dtype=np.float64)
+    B = (Vs >= tau).astype(np.float64)
+    cur = tci_violation(B, eps)
+    for _ in range(passes):
+        for j in range(m):
+            best_t, best_v = tau[j], cur
+            for t in cand[j]:
+                Bj = B.copy()
+                Bj[:, j] = (Vs[:, j] >= t).astype(np.float64)
+                v = tci_violation(Bj, eps)
+                if v < best_v:
+                    best_v, best_t = v, t
+            tau[j] = best_t
+            B[:, j] = (Vs[:, j] >= best_t).astype(np.float64)
+            cur = best_v
+    return tau
+
+
+def apply_g_tau(V: np.ndarray, tau: np.ndarray) -> np.ndarray:
+    """Binarize: Ṽ_{ij} = 1[V_{ij} >= τ_j] in {0,1} (fit_mom maps to ±1)."""
+    return (V >= tau).astype(np.float64)
+
+
+# --------------------------------------------------------------------------- #
+# Algorithm 1, steps 5-7: ensemble-family optimization f_theta (eq. 7)         #
+# --------------------------------------------------------------------------- #
+def optimize_ensemble(V_fit: np.ndarray, p_hat: np.ndarray,
+                      epochs: int = 500, lr: float = 0.5, l2: float = 1e-3):
+    """Optimize the ensemble family f_θ = σ(θᵀV + b) by maximizing the label-free
+    accuracy estimate Âcc(θ) = Σ (2p̂−1) f_θ(V)  (eq. 7).
+
+    p̂ is used ONLY as the accuracy estimator, not the predictor. The maximizer of
+    Âcc over the logistic family is a confidence-weighted fit to the pseudo-label
+    decision boundary: hard labels ŷ = 1[p̂>0.5] with sample weights |2p̂−1|. This
+    is the well-posed surrogate (no f_θ≡1 collapse) and, unlike distilling p̂, it
+    can diverge from and outperform the raw posterior.
+    """
+    n, m = V_fit.shape
+    yhat = (p_hat > 0.5).astype(np.float64)          # hard pseudo-labels
+    weight = np.abs(2.0 * p_hat - 1.0)               # confidence in [0,1]
+    weight = weight / (weight.mean() + 1e-8)         # normalize -> stable lr
+    w = np.zeros(m)
+    b = 0.0
+    for _ in range(epochs):
+        s = 1.0 / (1.0 + np.exp(-(V_fit @ w + b)))
+        g = weight * (s - yhat)                      # weighted logistic gradient
+        w -= lr * (V_fit.T @ g / n + l2 * w)
+        b -= lr * g.mean()
+    return w, b
+
+
+def predict_ensemble(V: np.ndarray, w: np.ndarray, b: float) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-(V @ w + b)))

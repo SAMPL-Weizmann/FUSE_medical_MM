@@ -1,10 +1,16 @@
-"""Per-verifier and per-prediction metrics (binary; threshold soft scores at 0.5)."""
+"""Per-prediction metrics (binary; threshold soft scores at 0.5).
+
+Reports the confusion counts (TP/TN/FP/FN) and everything derivable from them
+plus the threshold-free AUC / average precision.
+"""
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
-from ..heads.metrics import roc_auc
+from ..heads.metrics import average_precision, roc_auc
 
 
 def _sens_spec(pred01: np.ndarray, y01: np.ndarray):
@@ -12,19 +18,41 @@ def _sens_spec(pred01: np.ndarray, y01: np.ndarray):
     fn = int(((pred01 == 0) & (y01 == 1)).sum())
     tn = int(((pred01 == 0) & (y01 == 0)).sum())
     fp = int(((pred01 == 1) & (y01 == 0)).sum())
-    sens = tp / max(tp + fn, 1)          # P(pred=1 | y=1)
-    spec = tn / max(tn + fp, 1)          # P(pred=0 | y=0)
+    sens = tp / max(tp + fn, 1)
+    spec = tn / max(tn + fp, 1)
     return sens, spec
 
 
+def _safe(a, b):
+    return a / b if b else 0.0
+
+
 def score_stats(score: np.ndarray, y01: np.ndarray, threshold: float = 0.5) -> dict:
-    """Metrics for a soft score in [0,1] against labels y in {0,1}."""
-    pred = (np.asarray(score) >= threshold).astype(int)
-    sens, spec = _sens_spec(pred, y01)
+    """Full metric set for a soft score in [0,1] against labels y in {0,1}."""
+    score = np.asarray(score, dtype=float)
+    y = np.asarray(y01, dtype=int)
+    pred = (score >= threshold).astype(int)
+
+    tp = int(((pred == 1) & (y == 1)).sum())
+    fp = int(((pred == 1) & (y == 0)).sum())
+    tn = int(((pred == 0) & (y == 0)).sum())
+    fn = int(((pred == 0) & (y == 1)).sum())
+
+    sens = _safe(tp, tp + fn)            # recall / TPR
+    spec = _safe(tn, tn + fp)            # TNR
+    prec = _safe(tp, tp + fp)            # PPV
+    npv = _safe(tn, tn + fn)
+    f1 = _safe(2 * prec * sens, prec + sens)
+    denom = math.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+    mcc = _safe(tp * tn - fp * fn, denom) if denom else 0.0
+
     return {
-        "acc": float((pred == y01).mean()),
-        "balanced_acc": float((sens + spec) / 2),
-        "sensitivity": float(sens),
-        "specificity": float(spec),
-        "auc": roc_auc(y01, score),
+        "tp": tp, "tn": tn, "fp": fp, "fn": fn,
+        "acc": _safe(tp + tn, tp + tn + fp + fn),
+        "balanced_acc": (sens + spec) / 2,
+        "sensitivity": sens, "recall": sens, "specificity": spec,
+        "precision": prec, "npv": npv, "f1": f1, "mcc": mcc,
+        "youden_j": sens + spec - 1.0,
+        "auc": roc_auc(y, score),
+        "ap": average_precision(y, score),
     }

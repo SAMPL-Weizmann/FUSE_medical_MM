@@ -134,7 +134,7 @@ def write_report_md(runs, out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="artifacts/fuse")
-    ap.add_argument("--out", default="artifacts/reports")
+    ap.add_argument("--out", default="artifacts/reports/benchmark")
     args = ap.parse_args()
 
     runs = load_runs(args.dir)
