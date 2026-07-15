@@ -39,9 +39,12 @@ selection:
 # --- Label scheme ------------------------------------------------------------
 # Native table labels: 0 = normal (takin), 1 = benign (shafir), 2 = malignant (BC)
 # scheme options:
-#   "binary_abnormal"  -> {0}->0 (normal), {1,2}->1 (abnormal)   [ACTIVE]
-#   "binary_malignant" -> drop 0, {1}->0 (benign), {2}->1 (malignant)
-#   "multiclass"       -> keep 0/1/2 as-is
+#   "binary_abnormal"           -> {0}->0 (normal), {1,2}->1 (abnormal)   [ACTIVE]
+#   "binary_malignant_vs_rest"  -> {0,1}->0 (non-malignant), {2}->1 (malignant);
+#                                  keeps the WHOLE cohort. See configs/data_malig.yaml.
+#   "binary_malignant"          -> DROPS 0, {1}->0 (benign), {2}->1 (malignant);
+#                                  note this SHRINKS the cohort (normals removed).
+#   "multiclass"                -> keep 0/1/2 as-is
 labels:
   scheme: "binary_abnormal"
   class_names: ["normal", "abnormal"]

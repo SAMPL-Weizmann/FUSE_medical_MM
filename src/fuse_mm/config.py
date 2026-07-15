@@ -28,8 +28,17 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
 
     Relative artifact paths are resolved against the project root so they land
     in the repo, while dataset paths (absolute, on the Z: drive) are left as-is.
+
+    When `path` is None the file comes from FUSE_DATA_CONFIG if set, else
+    configs/data.yaml. The env var exists because several call sites (cv.folds,
+    fuse.train) call load_config() with no argument, so an alternative data
+    config (e.g. configs/data_malig.yaml, the malignant-vs-rest relabeling)
+    can only reach them via the environment:
+        export FUSE_DATA_CONFIG=configs/data_malig.yaml
     """
-    cfg_path = Path(path) if path is not None else default_config_path()
+    if path is None:
+        path = os.environ.get("FUSE_DATA_CONFIG") or default_config_path()
+    cfg_path = Path(path)
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -74,6 +83,7 @@ def _validate(cfg: dict[str, Any]) -> None:
             f"test={ratios['test']})"
         )
     scheme = cfg["labels"]["scheme"]
-    valid = {"binary_abnormal", "binary_malignant", "multiclass"}
+    valid = {"binary_abnormal", "binary_malignant", "binary_malignant_vs_rest",
+             "multiclass"}
     if scheme not in valid:
         raise ValueError(f"labels.scheme must be one of {valid}, got {scheme!r}")

@@ -1,0 +1,81 @@
+#!/bin/bash
+# LSF job: full-pipeline CV for the MALIGNANT vs NON-MALIGNANT relabeling
+# (configs/data_malig.yaml, scheme=binary_malignant_vs_rest: {normal,benign}->0,
+# {malignant}->1). Everything else matches the abnormal runs.
+#
+# Parametrized so ONE file covers all four setups (env vars):
+#   ANS     1 | 2      answers per head  (1 -> configs/fuse_1ans.yaml, 16 verifiers)
+#   FOLDS   10 | 20    CV folds
+#   N_TEST  1 | 2      folds held out as Test  (10->1, 20->2)
+#   LAMBDAS "0.2"      lambda list for this job (fan-out: one lambda per job)
+#
+# Out dirs (never collide with the abnormal runs, which live in reports/cv*):
+#   artifacts/reports/malig_cv/         10-fold, 2 answers   [RUN]
+#   artifacts/reports/malig_cv_1ans/    10-fold, 1 answer    [RUN]
+#   artifacts/reports/malig_cv20/       20-fold, 2 answers   [not run]
+#   artifacts/reports/malig_cv20_1ans/  20-fold, 1 answer    [not run]
+#
+# SCOPE: 10-fold ONLY. Malignant is 117/1594 = 7.3% of the cohort, so the 20-fold
+# rotation (S_L = 5% ~= 80 patients) leaves only ~6 malignant patients to train
+# the heads on — not a usable positive class. 10-fold gives ~12. FOLDS/N_TEST are
+# still parametrized, so the 20-fold rotation stays one env var away if wanted.
+#
+# REQUIRED PREP (once, on the login node — needs the data share):
+#   source scripts/wexac/activate.sh && source scripts/wexac/env.sh
+#   export FUSE_DATA_CONFIG=configs/data_malig.yaml
+#   python scripts/01_make_splits.py --config configs/data_malig.yaml   # -> artifacts/malig/splits.json
+#   python -c "import sys; sys.path.insert(0,'src'); from fuse_mm.cv import make_cv_folds; \
+#              make_cv_folds(n_folds=10); make_cv_folds(n_folds=20)"    # -> artifacts/malig/cv_folds{,_20}.json
+#
+# Fan-out, both 10-fold setups (12 jobs):
+#   for L in 0 0.1 0.2 0.3 0.5 1; do
+#     ANS=2 FOLDS=10 N_TEST=1 LAMBDAS="$L" bsub < scripts/wexac/malig_cv.lsf
+#     ANS=1 FOLDS=10 N_TEST=1 LAMBDAS="$L" bsub < scripts/wexac/malig_cv.lsf
+#   done
+#
+# Then merge + render each setup:
+#   ANS=2 bsub < scripts/wexac/malig_cv_report.lsf
+#   ANS=1 bsub < scripts/wexac/malig_cv_report.lsf
+#
+#BSUB -J fuse_malig_cv
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/malig_cv.%J.out
+#BSUB -e logs/malig_cv.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+# THE switch: every internal load_config() reads the malignant relabeling.
+export FUSE_DATA_CONFIG=configs/data_malig.yaml
+
+ANS="${ANS:-2}"
+FOLDS="${FOLDS:-10}"
+N_TEST="${N_TEST:-1}"
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"
+
+if [ "$ANS" = "1" ]; then
+    FUSE_CFG="configs/fuse_1ans.yaml"; SUFFIX="_1ans"
+else
+    FUSE_CFG="configs/fuse.yaml";      SUFFIX=""
+fi
+if [ "$FOLDS" = "10" ]; then BASE="artifacts/reports/malig_cv${SUFFIX}"
+else                         BASE="artifacts/reports/malig_cv${FOLDS}${SUFFIX}"; fi
+
+OUT_DIR="${BASE}/lambda_${LAMBDAS// /_}"
+echo "malig CV | ans=$ANS folds=$FOLDS n_test=$N_TEST lambdas=$LAMBDAS"
+echo "         | fuse cfg=$FUSE_CFG -> $OUT_DIR"
+
+python -u scripts/12_cv.py --config "$FUSE_CFG" \
+    --lambdas $LAMBDAS --folds "$FOLDS" --n-test "$N_TEST" \
+    --device cpu --out-dir "$OUT_DIR"
+
+echo "malig cv done -> $OUT_DIR"

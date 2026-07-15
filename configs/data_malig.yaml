@@ -1,0 +1,64 @@
+# =============================================================================
+# FUSE_medical_MM — data configuration, MALIGNANT vs NON-MALIGNANT relabeling.
+#
+# Identical to configs/data.yaml (same dataset, same selection, same ratios and
+# seed) EXCEPT:
+#   labels.scheme        binary_abnormal -> binary_malignant_vs_rest
+#                        i.e. {normal, benign} -> 0, {malignant} -> 1
+#   artifacts.splits_path artifacts/splits.json -> artifacts/malig/splits.json
+#
+# Why the splits path moves to its own DIRECTORY (not just a new filename):
+# cv/folds.py derives the fold file from the splits path via `.with_name()`, so
+# a sibling file would still land on artifacts/cv_folds.json and clobber the
+# binary_abnormal folds. Its own dir keeps splits + cv_folds{,_20}.json isolated.
+#
+# features_dir is deliberately SHARED with the abnormal runs: backbones are
+# frozen and label-independent, cv builds banks from load_full_featuresets()
+# pooled by patient id, and build_bank_pooled() takes y from the fold records
+# (NOT from the npz), so the stale y inside the feature npz is never read.
+# => no GPU re-extraction is needed for the relabeling.
+#
+# Use it by exporting the env switch (every internal load_config() picks it up):
+#   export FUSE_DATA_CONFIG=configs/data_malig.yaml
+# =============================================================================
+
+dataset:
+  root: "Z:/Studies_under_Helsinki_approval/Beilinson_Multi_Modality_Dr_Ahuva_Grubstein/Data/final Data adi project/FINAL DATA/MG & US"
+  mg_subdir: "MG_CLEAN_NPY"
+  us_subdir: "US_CLEAN_NPY"
+  label_table: "Z:/Studies_under_Helsinki_approval/Beilinson_Multi_Modality_Dr_Ahuva_Grubstein/Data/final Data adi project/FINAL TABLES/Tables - Useful/clean_mm.xlsx"
+
+# --- Per-patient scan selection — UNCHANGED from data.yaml -------------------
+selection:
+  mg:
+    mode: "canonical_views"
+    views: ["CC C-View", "CC Tomosynthesis Projection", "MLO C-View", "MLO Tomosynthesis Projection"]
+    require_all_views: true
+  us:
+    mode: "k_frames"
+    k: 1
+    strategy: "first"
+    pad: "repeat"
+    seed: 42
+
+# --- Label scheme — THE ONLY MODELLING CHANGE -------------------------------
+# Native table labels: 0 = normal (takin), 1 = benign (shafir), 2 = malignant (BC)
+#   {0,1} -> 0 (non-malignant), {2} -> 1 (malignant). No patient is dropped, so
+#   the cohort is byte-for-byte the same patients as the binary_abnormal runs.
+labels:
+  scheme: "binary_malignant_vs_rest"
+  class_names: ["non_malignant", "malignant"]
+
+# --- Split — UNCHANGED ratios/seed (stratification now uses the NEW label) ---
+split:
+  ratios:
+    labeled:   0.10
+    unlabeled: 0.80
+    test:      0.10
+  seed: 42
+  require_both_modalities: true
+
+# --- Outputs -----------------------------------------------------------------
+artifacts:
+  splits_path: "artifacts/malig/splits.json"   # own dir -> own cv_folds{,_20}.json
+  features_dir: "artifacts/features"           # SHARED with the abnormal runs

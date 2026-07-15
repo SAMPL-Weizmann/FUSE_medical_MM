@@ -90,10 +90,12 @@ def map_label(raw: int, scheme: str) -> int | None:
         return raw
     if scheme == "binary_abnormal":          # normal vs (benign+malignant)
         return 0 if raw == 0 else 1
-    if scheme == "binary_malignant":         # benign vs malignant; drop normal
+    if scheme == "binary_malignant":         # benign vs malignant; DROPS normal
         if raw == 0:
             return None
         return 0 if raw == 1 else 1
+    if scheme == "binary_malignant_vs_rest":  # (normal+benign) vs malignant; keeps ALL
+        return 1 if raw == 2 else 0
     raise ValueError(f"unknown label scheme {scheme!r}")
 
 
