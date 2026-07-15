@@ -42,12 +42,12 @@ def main() -> None:
     if not part_files:
         raise SystemExit(f"no lambda_*/cv_results.json found under {base}/ — nothing to merge")
 
-    merged, n_folds = {}, None
+    merged, n_folds, n_test = {}, None, None
     for pf in part_files:
         with open(pf, encoding="utf-8") as fh:
             part = json.load(fh)
         if n_folds is None:
-            n_folds = part["n_folds"]
+            n_folds, n_test = part["n_folds"], part.get("n_test", 1)
         elif n_folds != part["n_folds"]:
             raise SystemExit(f"n_folds mismatch: {pf} has {part['n_folds']}, expected {n_folds}")
         for lam, res in part["results"].items():
@@ -61,7 +61,8 @@ def main() -> None:
 
     os.makedirs(base, exist_ok=True)
     with open(os.path.join(base, "cv_results.json"), "w", encoding="utf-8") as f:
-        json.dump({"n_folds": n_folds, "lambdas": lambdas, "results": results}, f, indent=2)
+        json.dump({"n_folds": n_folds, "n_test": n_test, "lambdas": lambdas,
+                   "results": results}, f, indent=2)
     _write_csv(results, base)
     _print(results)
     print(f"\nmerged {len(results)} lambdas from {len(part_files)} parts "

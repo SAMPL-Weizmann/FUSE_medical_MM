@@ -1,0 +1,39 @@
+# =============================================================================
+# FUSE stage-1 joint training — SINGLE-ANSWER variant (n_answers=1).
+#   L = L_CE(S_L) + alpha * L_NCL(S_L) + lambda * L_TCI(S_U)
+# Identical to configs/fuse.yaml EXCEPT head.n_answers = 1, so each
+# (modality, backbone) head emits ONE verifier instead of an NCL twin pair:
+# 8 backbones x 2 modalities x 1 answer = 16 verifiers (vs 32 in fuse.yaml).
+# With a single answer there is no answer-pair to decorrelate, so L_NCL is 0
+# by construction (see _decorr_loss k<2 guard) and alpha_ncl is a no-op -> 0.
+# Kept as a SEPARATE file so the 32-verifier config/runs stay reproducible.
+# =============================================================================
+
+verifiers:
+  modalities: ["MG", "US"]
+  backbones: null            # null = all backbones found under features/<set>/<modality>
+
+head:
+  type: "linear"             # linear | mlp
+  mlp_layers: [256]
+  dropout: 0.1
+  n_answers: 1               # single verifier per (modality,backbone) -> 16 total
+  standardize: true          # z-score each verifier's features (fit on S_L)
+  class_weight: "balanced"
+
+train:
+  warmstart_epochs: 300      # L_CE only (no NCL twins to warm up)
+  joint_epochs: 500          # add lambda*L_TCI on S_U
+  lr: 0.001
+  weight_decay: 0.0001
+  alpha_ncl: 0.0             # no-op with n_answers=1 (no answer-pair to decorrelate)
+  lambda_tci: 1.0            # the real diversity force (conditional, on S_U)
+  tci_eps: 0.05              # epsilon-floor on |Sigma_ab| in the TCI denominator
+  log_every: 50
+
+io:
+  features_dir: "artifacts/features"   # FUSE_FEATURES_DIR overrides
+  labeled_set: "labeled"
+  unlabeled_set: "unlabeled"
+  test_set: "test"
+  out_dir: "artifacts/fuse"

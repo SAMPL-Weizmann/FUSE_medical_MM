@@ -1,0 +1,37 @@
+#!/bin/bash
+# LSF job: compute verifier Grad-CAM for the 10-fold CV at lambda=0.2.
+# Retrains ALL 10 folds' heads (needed to rank folds by fuse_ens test bAcc for
+# the per-patient role columns) AND runs the live backbones on the raw scans
+# (GPU for the ViT/CLIP backbones + dataset access on /home/hsd). Columns are
+# per-patient roles: labeled / best-unlabeled / test.
+#
+#   bsub < scripts/wexac/gradcam.lsf
+#
+# After it finishes, build the figures (locally or via gradcam_figures.lsf):
+#   python scripts/18_gradcam.py plot --config cv10
+#
+#BSUB -J fuse_gcam10
+#BSUB -q short-gpu
+#BSUB -gpu "num=1"
+#BSUB -n 2
+#BSUB -R "rusage[mem=32GB] span[hosts=1]"
+#BSUB -W 2:00
+#BSUB -o logs/gradcam10.%J.out
+#BSUB -e logs/gradcam10.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+DEV="cuda"
+python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" || DEV="cpu"
+echo "grad-cam cv10 compute on device=$DEV"
+
+python -u scripts/18_gradcam.py compute --config cv10 --device "$DEV"
+
+echo "grad-cam cv10 done -> artifacts/reports/gradcam/ (gcam_*.npz + manifest)"

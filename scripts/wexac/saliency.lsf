@@ -1,0 +1,36 @@
+#!/bin/bash
+# LSF job: compute verifier input-gradient saliency (d(margin)/dx) at lambda=0.2.
+# Retrains per-fold heads (folds 7,3,6) AND runs the live backbones on the raw
+# scans (needs GPU for the ViT/CLIP backbones + dataset access on /home/hsd).
+#
+#   bsub < scripts/wexac/saliency.lsf
+#
+# After it finishes, build the figures locally:
+#   python scripts/17_saliency.py plot
+#
+#BSUB -J fuse_sal
+#BSUB -q short-gpu
+#BSUB -gpu "num=1"
+#BSUB -n 2
+#BSUB -R "rusage[mem=32GB] span[hosts=1]"
+#BSUB -W 2:00
+#BSUB -o logs/saliency.%J.out
+#BSUB -e logs/saliency.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+# GPU for the live backbones; heads are tiny. Falls back to CPU if no GPU visible.
+DEV="cuda"
+python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" || DEV="cpu"
+echo "saliency compute on device=$DEV"
+
+python -u scripts/17_saliency.py compute --device "$DEV"
+
+echo "saliency compute done -> artifacts/reports/saliency/ (sal_*.npz + manifest)"

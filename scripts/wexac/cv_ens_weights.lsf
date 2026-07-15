@@ -1,0 +1,34 @@
+#!/bin/bash
+# LSF job: dump per-fold fuse_ens ensemble weights for one lambda (CV folds).
+# CPU only (linear heads on pre-extracted features), but retrains all folds ->
+# same weight-class as one lambda of 12_cv.py. Override lambda with LAM="0.2".
+#
+#   bsub < scripts/wexac/cv_ens_weights.lsf
+#   # or a different lambda:
+#   LAM=0.1 bsub < scripts/wexac/cv_ens_weights.lsf
+#
+# After it finishes, build the two figures locally:
+#   python scripts/16_cv_ensemble_weights.py plot --lambda 0.2
+#
+#BSUB -J fuse_ensw
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 2:00
+#BSUB -o logs/cv_ensw.%J.out
+#BSUB -e logs/cv_ensw.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+# 1 bound core -> keep BLAS/torch single-threaded.
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+LAM="${LAM:-0.2}"
+python -u scripts/16_cv_ensemble_weights.py dump --lambda "$LAM" --device cpu
+
+echo "ens-weights dump done -> artifacts/reports/ensemble_weights/cv_ens_weights_lambda_${LAM}.json"

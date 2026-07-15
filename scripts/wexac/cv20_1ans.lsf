@@ -1,0 +1,43 @@
+#!/bin/bash
+# LSF job: 20-fold CV (5/85/10), SINGLE-ANSWER variant (16 verifiers,
+# configs/fuse_1ans.yaml). Same rotation as cv20.lsf but n_answers=1 -> half the
+# verifiers, and a SEPARATE out-dir (reports/cv20_1ans/) so the 32-verifier
+# results are not clobbered. Override lambdas with LAMBDAS="...".
+#
+# Reuses the SAME cv_folds_20.json as the 32-verifier run (identical patient
+# splits -> a fair 16-vs-32 comparison). Do NOT regenerate the folds.
+#
+# Fan-out (one job per lambda, parallel):
+#   1) folds already exist from the 32-verifier run; regenerate only if missing:
+#        python -c "import sys; sys.path.insert(0,'src'); \
+#                   from fuse_mm.cv import make_cv_folds; make_cv_folds(n_folds=20)"
+#   2) submit one job per lambda (each writes reports/cv20_1ans/lambda_<L>/):
+#        for L in 0 0.1 0.2 0.3 0.5 1; do LAMBDAS="$L" bsub < scripts/wexac/cv20_1ans.lsf; done
+#   3) after all finish, merge into one report:
+#        python scripts/13_cv_merge.py --config configs/fuse_1ans.yaml --base artifacts/reports/cv20_1ans
+#
+# Single-job mode (all lambdas, one combined file): LAMBDAS="0 0.1 0.2 0.3 0.5 1".
+#
+#BSUB -J fuse_cv20_1ans
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/cv20_1ans.%J.out
+#BSUB -e logs/cv20_1ans.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"
+OUT_DIR="artifacts/reports/cv20_1ans/lambda_${LAMBDAS// /_}"
+python -u scripts/12_cv.py --config configs/fuse_1ans.yaml \
+    --lambdas $LAMBDAS --folds 20 --n-test 2 --device cpu --out-dir "$OUT_DIR"
+
+echo "cv20_1ans done -> $OUT_DIR"

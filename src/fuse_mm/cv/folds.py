@@ -16,8 +16,11 @@ from ..config import load_config, project_root
 from ..splits import load_splits
 
 
-def _cv_path(cfg) -> Path:
-    return Path(cfg["artifacts"]["splits_path"]).with_name("cv_folds.json")
+def _cv_path(cfg, n_folds: int = 10) -> Path:
+    # 10-fold keeps the original filename; other fold counts get their own file
+    # so the 10-fold split/results are never clobbered.
+    name = "cv_folds.json" if n_folds == 10 else f"cv_folds_{n_folds}.json"
+    return Path(cfg["artifacts"]["splits_path"]).with_name(name)
 
 
 def make_cv_folds(n_folds: int = 10, seed: int = 42, cfg=None, write: bool = True) -> dict:
@@ -48,24 +51,26 @@ def make_cv_folds(n_folds: int = 10, seed: int = 42, cfg=None, write: bool = Tru
     folds = {"n_folds": n_folds, "seed": seed, "records": records,
              "fold_sizes": {int(f): int((fold_of == f).sum()) for f in range(n_folds)}}
     if write:
-        with open(_cv_path(cfg), "w", encoding="utf-8") as fh:
+        with open(_cv_path(cfg, n_folds), "w", encoding="utf-8") as fh:
             json.dump(folds, fh, indent=2)
     return folds
 
 
-def load_cv_folds(cfg=None) -> dict:
+def load_cv_folds(cfg=None, n_folds: int = 10) -> dict:
     cfg = cfg or load_config()
-    with open(_cv_path(cfg), "r", encoding="utf-8") as fh:
+    with open(_cv_path(cfg, n_folds), "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
-def fold_assignment(folds: dict, i: int) -> dict:
-    """S_L = fold i, Test = fold (i+1) mod n (circular), S_U = the rest."""
+def fold_assignment(folds: dict, i: int, n_test: int = 1) -> dict:
+    """S_L = fold i, Test = the next `n_test` folds (circular), S_U = the rest.
+    n_test=1 recovers the original 10-fold rotation; n_test=2 gives the 20-fold
+    5/85/10 split (S_L=1 fold, S_U=17, Test=2)."""
     n = folds["n_folds"]
-    test = (i + 1) % n
+    test = {(i + 1 + j) % n for j in range(n_test)}
     recs = folds["records"]
     return {
         "labeled": [r for r in recs if r["fold"] == i],
-        "test": [r for r in recs if r["fold"] == test],
-        "unlabeled": [r for r in recs if r["fold"] not in (i, test)],
+        "test": [r for r in recs if r["fold"] in test],
+        "unlabeled": [r for r in recs if r["fold"] != i and r["fold"] not in test],
     }

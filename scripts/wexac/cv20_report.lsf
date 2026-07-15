@@ -1,0 +1,33 @@
+#!/bin/bash
+# LSF job: build the cv20 figures + summary tables from the merged 20-fold results.
+# Requires the merge to have run first:
+#   python scripts/13_cv_merge.py --base artifacts/reports/cv20
+# Reads artifacts/reports/cv20/cv_results.json; writes figures + tables (PNG/CSV)
+# into artifacts/reports/cv20/. Pure numpy + matplotlib, no GPU.
+#
+#   bsub < scripts/wexac/cv20_report.lsf
+#
+#BSUB -J fuse_cv20rep
+#BSUB -q short
+#BSUB -n 1
+#BSUB -R "rusage[mem=8GB]"
+#BSUB -W 0:30
+#BSUB -o logs/cv20_report.%J.out
+#BSUB -e logs/cv20_report.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+python -c "import matplotlib" 2>/dev/null || { echo "matplotlib missing in fuse_mm env; installing"; pip install -q matplotlib; }
+
+RES="artifacts/reports/cv20/cv_results.json"
+test -f "$RES" || { echo "ERROR: $RES not found -- run the merge first: python scripts/13_cv_merge.py --base artifacts/reports/cv20"; exit 1; }
+
+python -u scripts/14_cv_plots.py  --results "$RES"
+python -u scripts/15_cv_tables.py --results "$RES"
+
+echo "cv20 report done -> artifacts/reports/cv20/ (figures + tables)"

@@ -48,10 +48,12 @@ def _decorr_loss(scores):
     """
     import torch
 
+    k = scores.shape[1]
+    if k < 2:                                           # one answer -> no pair to decorrelate
+        return scores.new_zeros(())                     # (avoids /(k*(k-1))=0 -> NaN)
     sc = scores - scores.mean(dim=0, keepdim=True)
     normed = sc / sc.norm(dim=0).clamp_min(1e-8)
     corr = normed.t() @ normed                          # (n_out, n_out) cosine
-    k = scores.shape[1]
     off = corr - torch.eye(k, device=corr.device, dtype=corr.dtype)
     return (off ** 2).sum() / (k * (k - 1))
 

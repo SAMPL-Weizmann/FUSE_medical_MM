@@ -31,12 +31,12 @@ def _agg(dicts):
                 "std": float(np.std([d[k] for d in dicts]))} for k in keys}
 
 
-def run_cv(cfg, lambdas, n_folds=10, device="cpu", out_dir=None, verbose=False):
+def run_cv(cfg, lambdas, n_folds=10, n_test=1, device="cpu", out_dir=None, verbose=False):
     feats_dir = cfg["io"]["features_dir"]
     verifiers = resolve_verifiers(cfg, feats_dir)
     full_fs = load_full_featuresets(feats_dir, verifiers)     # all cohort patients, once
     try:
-        folds = load_cv_folds()
+        folds = load_cv_folds(n_folds=n_folds)
     except FileNotFoundError:
         folds = make_cv_folds(n_folds=n_folds)
     n_folds = folds["n_folds"]
@@ -52,7 +52,7 @@ def run_cv(cfg, lambdas, n_folds=10, device="cpu", out_dir=None, verbose=False):
         skipped = set()
 
         for i in range(n_folds):
-            fs = fold_assignment(folds, i)
+            fs = fold_assignment(folds, i, n_test=n_test)
             banks, ys, pids = {}, {}, {}
             for key, s in [("L", "labeled"), ("U", "unlabeled"), ("T", "test")]:
                 banks[key], ys[key], pids[key] = build_bank_pooled(full_fs, fs[s], verifiers)
@@ -85,7 +85,8 @@ def run_cv(cfg, lambdas, n_folds=10, device="cpu", out_dir=None, verbose=False):
     out_dir = out_dir or os.path.join(os.path.dirname(cfg["io"]["out_dir"]), "reports", "cv")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "cv_results.json"), "w", encoding="utf-8") as f:
-        json.dump({"n_folds": n_folds, "lambdas": lambdas, "results": results}, f, indent=2)
+        json.dump({"n_folds": n_folds, "n_test": n_test, "lambdas": lambdas,
+                   "results": results}, f, indent=2)
     _write_csv(results, out_dir)
     _print(results)
     print(f"\nwrote cv_results.json + cv_summary.csv to {out_dir}/")

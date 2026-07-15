@@ -1,0 +1,41 @@
+#!/bin/bash
+# LSF job: 20-fold cross-validation, 5/85/10 split.
+#   S_L = 1 fold (5%), S_U = 17 folds (85%), Test = 2 folds (10%), rotated over
+#   all 20 folds (20 iterations). CPU only, but heavy (20 folds x lambdas full
+#   retrains -> ~2x the 10-fold job). Override lambdas with LAMBDAS="...".
+#
+# Fan-out (one job per lambda, parallel) — REQUIRED PREP so jobs don't race on
+# the folds file or clobber each other's output:
+#   1) pre-generate the 20-fold split ONCE on the login node:
+#        python -c "import sys; sys.path.insert(0,'src'); \
+#                   from fuse_mm.cv import make_cv_folds; make_cv_folds(n_folds=20)"
+#   2) submit one job per lambda (each writes reports/cv20/lambda_<L>/):
+#        for L in 0 0.1 0.2 0.3 0.5 1; do LAMBDAS="$L" bsub < scripts/wexac/cv20.lsf; done
+#   3) after all finish, merge into one report:
+#        python scripts/13_cv_merge.py --base artifacts/reports/cv20
+#
+# Single-job mode (all lambdas, one combined file): LAMBDAS="0 0.1 0.2 0.3 0.5 1".
+#
+#BSUB -J fuse_cv20
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/cv20.%J.out
+#BSUB -e logs/cv20.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"
+OUT_DIR="artifacts/reports/cv20/lambda_${LAMBDAS// /_}"
+python -u scripts/12_cv.py --lambdas $LAMBDAS --folds 20 --n-test 2 \
+    --device cpu --out-dir "$OUT_DIR"
+
+echo "cv20 done -> $OUT_DIR"

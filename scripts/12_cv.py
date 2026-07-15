@@ -1,11 +1,15 @@
 """Cross-validate the full FUSE pipeline over a lambda list.
 
-10-fold rotation (S_L = fold i, Test = fold i+1 circular, S_U = rest); retrains
-the verifiers per fold, benchmarks all methods on S_L/S_U/Test, aggregates
-per-fold mean/std + pooled out-of-fold. Outputs artifacts/reports/cv/.
+Rotation: S_L = fold i, Test = the next `--n-test` folds (circular), S_U = rest;
+retrains the verifiers per fold, benchmarks all methods on S_L/S_U/Test,
+aggregates per-fold mean/std + pooled out-of-fold.
+  * default  10 folds, n_test=1  -> 10/80/10  (S_L/S_U/Test), cv_folds.json
+  * 20 folds, n_test=2           ->  5/85/10, cv_folds_20.json
 
 Usage:
-    python scripts/12_cv.py [--lambdas 0 0.1 0.2 0.3 0.5 1] [--folds 10]
+    python scripts/12_cv.py [--lambdas 0 0.1 0.2 0.3 0.5 1] [--folds 10] [--n-test 1]
+    # 20-fold 5/85/10:
+    python scripts/12_cv.py --folds 20 --n-test 2 --out-dir artifacts/reports/cv20/...
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ def main() -> None:
     ap.add_argument("--config", default=None)
     ap.add_argument("--lambdas", nargs="+", type=float, default=[0, 0.1, 0.2, 0.3, 0.5, 1])
     ap.add_argument("--folds", type=int, default=10)
+    ap.add_argument("--n-test", type=int, default=1,
+                    help="number of folds used as Test each iteration (2 for the "
+                         "20-fold 5/85/10 split)")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out-dir", default=None,
                     help="where to write cv_results.json/cv_summary.csv "
@@ -39,14 +46,15 @@ def main() -> None:
         make_cv_folds(n_folds=args.folds)
     else:
         try:
-            load_cv_folds()
+            load_cv_folds(n_folds=args.folds)
         except FileNotFoundError:
             make_cv_folds(n_folds=args.folds)
 
     print("=" * 70)
-    print(f"FUSE CV  |  folds={args.folds}  lambdas={args.lambdas}")
+    print(f"FUSE CV  |  folds={args.folds}  n_test={args.n_test}  lambdas={args.lambdas}")
     print("=" * 70)
-    run_cv(cfg, args.lambdas, n_folds=args.folds, device=args.device, out_dir=args.out_dir)
+    run_cv(cfg, args.lambdas, n_folds=args.folds, n_test=args.n_test,
+           device=args.device, out_dir=args.out_dir)
 
 
 if __name__ == "__main__":
