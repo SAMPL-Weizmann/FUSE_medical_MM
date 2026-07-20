@@ -38,6 +38,21 @@ def main() -> None:
                     help="where to write cv_results.json/cv_summary.csv "
                          "(default artifacts/reports/cv/). Use a per-lambda dir "
                          "when fanning out one lambda per job.")
+    ap.add_argument("--threshold-rules", nargs="+", default=["fixed"],
+                    choices=["fixed", "prevalence", "youden", "target_sensitivity"],
+                    help="decision-threshold rule(s) for turning soft scores into "
+                         "0/1 calls. Default 'fixed' (0.5) = unchanged. Extra rules "
+                         "cost ~nothing (computed in the same pass) and each writes "
+                         "to <out-dir>/<rule>/; 'fixed' alone keeps the old path.")
+    ap.add_argument("--prevalence", type=float, default=None,
+                    help="positive rate for the 'prevalence' rule (default: the "
+                         "labeled-set base rate). Pass e.g. 0.073 to stay label-free.")
+    ap.add_argument("--target-sensitivity", type=float, default=0.95,
+                    help="target recall for the 'target_sensitivity' rule")
+    ap.add_argument("--dump-predictions", action="store_true",
+                    help="also save pooled out-of-fold soft scores to "
+                         "<out-dir>/cv_pooled_predictions.npz (input for ROC/PR, "
+                         "scripts/20_roc_pr.py). Off by default.")
     ap.add_argument("--remake-folds", action="store_true", help="regenerate cv_folds.json")
     args = ap.parse_args()
 
@@ -52,9 +67,13 @@ def main() -> None:
 
     print("=" * 70)
     print(f"FUSE CV  |  folds={args.folds}  n_test={args.n_test}  lambdas={args.lambdas}")
+    print(f"         |  threshold_rules={args.threshold_rules}")
     print("=" * 70)
     run_cv(cfg, args.lambdas, n_folds=args.folds, n_test=args.n_test,
-           device=args.device, out_dir=args.out_dir)
+           device=args.device, out_dir=args.out_dir,
+           threshold_rules=args.threshold_rules, prevalence=args.prevalence,
+           target_sensitivity=args.target_sensitivity,
+           dump_predictions=args.dump_predictions)
 
 
 if __name__ == "__main__":

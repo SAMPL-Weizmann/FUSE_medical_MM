@@ -27,8 +27,14 @@ def _safe(a, b):
     return a / b if b else 0.0
 
 
-def score_stats(score: np.ndarray, y01: np.ndarray, threshold: float = 0.5) -> dict:
-    """Full metric set for a soft score in [0,1] against labels y in {0,1}."""
+def score_stats(score: np.ndarray, y01: np.ndarray, threshold=0.5) -> dict:
+    """Full metric set for a soft score in [0,1] against labels y in {0,1}.
+
+    `threshold` may be a scalar or a per-sample array (same length as `score`) —
+    the latter lets pooled out-of-fold metrics apply each fold's own decision
+    threshold. Only the confusion-count metrics depend on it; AUC/AP are
+    threshold-free.
+    """
     score = np.asarray(score, dtype=float)
     y = np.asarray(y01, dtype=int)
     pred = (score >= threshold).astype(int)

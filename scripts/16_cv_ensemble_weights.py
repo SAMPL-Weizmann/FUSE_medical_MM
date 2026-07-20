@@ -50,8 +50,10 @@ def _json_path(lam):
 
 
 # --------------------------------------------------------------------------- #
-def dump(lam, device, verbose):
-    """Retrain per fold, fit f_theta on each fold's OOF scores, save all folds."""
+def dump(lam, device, verbose, config=None):
+    """Retrain per fold, fit f_theta on each fold's OOF scores, save all folds.
+    `config` = FUSE head config (None -> configs/fuse.yaml, 2 answers). The data
+    task (abnormal vs malignant) comes from FUSE_DATA_CONFIG in the environment."""
     from fuse_mm.bench.metrics import score_stats
     from fuse_mm.fuse import load_fuse_config
     from fuse_mm.fuse.bank import (
@@ -60,7 +62,7 @@ def dump(lam, device, verbose):
     from fuse_mm.cv.folds import fold_assignment, load_cv_folds, make_cv_folds
     import copy
 
-    cfg = load_fuse_config(None)
+    cfg = load_fuse_config(config)
     cfg["train"]["lambda_tci"] = lam
     feats_dir = cfg["io"]["features_dir"]
     verifiers = resolve_verifiers(cfg, feats_dir)
@@ -155,15 +157,23 @@ def plot(lam, topk):
 
 
 def main():
+    global OUT
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["dump", "plot"])
     ap.add_argument("--lambda", dest="lam", type=float, default=0.2)
+    ap.add_argument("--config", default=None,
+                    help="FUSE head config (default configs/fuse.yaml, 2 answers; "
+                         "pass configs/fuse_1ans.yaml for the 1-answer setup)")
+    ap.add_argument("--out-dir", default=OUT,
+                    help=f"output dir (default {OUT}). Use a separate dir for the "
+                         "1-answer setup so the 2-answer figures aren't overwritten.")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--topk", type=int, default=3)
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
+    OUT = args.out_dir                                 # _json_path / _grouped_barh read this
     if args.mode == "dump":
-        dump(args.lam, args.device, args.verbose)
+        dump(args.lam, args.device, args.verbose, config=args.config)
     else:
         plot(args.lam, args.topk)
 

@@ -1,0 +1,65 @@
+#!/bin/bash
+# LSF job: re-score the MALIGNANT 10-fold CV under multiple DECISION-THRESHOLD
+# rules, to see how the operating point changes bAcc/sens/spec. Thresholding is
+# post-scoring, so ALL rules are computed in ONE retrain pass (~same cost as a
+# single run). Writes to NEW dirs -> the hardcoded-0.5 results in malig_cv{,_1ans}/
+# are NOT touched.
+#
+#   ANS=2 -> artifacts/reports/malig_cv_thr/<rule>/       (32 verifiers)
+#   ANS=1 -> artifacts/reports/malig_cv_thr_1ans/<rule>/  (16 verifiers)
+# where <rule> in {fixed, prevalence, youden, target_sensitivity}:
+#   fixed               tau=0.5 (baseline, == malig_cv/ — kept here for comparison)
+#   prevalence          flag the top 7.3% by score (label-free; --prevalence 0.073)
+#   youden              tau = argmax(sens+spec) on labeled S_L (maximizes bAcc)
+#   target_sensitivity  lowest tau catching >=95% of malignant S_L (screening cut)
+# All non-fixed rules fit tau on the LABELED fold and apply it to the held-out
+# test fold (never fit on test).
+#
+# Single-job mode (all 6 lambdas in one process) -> writes cv_results.json
+# directly per rule, NO 13_cv_merge needed. Run one job per setup:
+#   ANS=2 bsub < scripts/wexac/malig_cv_threshold.lsf
+#   ANS=1 bsub < scripts/wexac/malig_cv_threshold.lsf
+#
+#BSUB -J fuse_malig_thr
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/malig_cv_thr.%J.out
+#BSUB -e logs/malig_cv_thr.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+export FUSE_DATA_CONFIG=configs/data_malig.yaml
+
+ANS="${ANS:-2}"
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"
+RULES="${RULES:-fixed prevalence youden target_sensitivity}"
+if [ "$ANS" = "1" ]; then
+    FUSE_CFG="configs/fuse_1ans.yaml"; BASE="artifacts/reports/malig_cv_thr_1ans"
+else
+    FUSE_CFG="configs/fuse.yaml";      BASE="artifacts/reports/malig_cv_thr"
+fi
+
+echo "malig threshold sweep | ans=$ANS cfg=$FUSE_CFG rules=[$RULES] -> $BASE/<rule>/"
+python -u scripts/12_cv.py --config "$FUSE_CFG" \
+    --lambdas $LAMBDAS --folds 10 --n-test 1 --device cpu \
+    --threshold-rules $RULES --prevalence 0.073 --target-sensitivity 0.95 \
+    --out-dir "$BASE"
+
+# render figures + tables per rule (bAcc-ranked, as configured)
+for R in $RULES; do
+    RES="$BASE/$R/cv_results.json"
+    test -f "$RES" || { echo "WARN: $RES missing, skipping render"; continue; }
+    echo "rendering $R -> $BASE/$R/"
+    python -u scripts/14_cv_plots.py  --results "$RES"
+    python -u scripts/15_cv_tables.py --results "$RES"
+done
+
+echo "malig threshold sweep done -> $BASE/{fixed,prevalence,youden,target_sensitivity}/"

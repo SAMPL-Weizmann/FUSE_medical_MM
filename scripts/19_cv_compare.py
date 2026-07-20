@@ -71,9 +71,11 @@ def _load(paths: dict) -> dict:
     """key -> {"res": {...}, "lams": [str,...]} for every setup file that exists."""
     out = {}
     for key, path in paths.items():
-        if not path or not os.path.isfile(path):
-            print(f"  [skip] {key}: {path} not found")
+        if not path:                         # slot intentionally omitted
+            print(f"  [skip] {key}: not given")
             continue
+        if not os.path.isfile(path):         # given but wrong -> fail loudly, don't guess
+            raise SystemExit(f"--{key} points to a missing file: {path}")
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
         out[key] = {"res": data["results"],
@@ -275,12 +277,28 @@ def metric_slug(metric):
     return {"balanced_acc": "bacc"}.get(metric, metric)
 
 
+# canonical normal-vs-abnormal result paths, filled in ONLY by --preset abnormal.
+# NOT argparse defaults on purpose: defaulting these silently pulled the abnormal
+# 20-fold results into a malignant comparison when the cv20 slots were omitted.
+ABNORMAL_PRESET = {
+    "cv10-2ans": "artifacts/reports/cv/cv_results.json",
+    "cv20-2ans": "artifacts/reports/cv20/cv_results.json",
+    "cv10-1ans": "artifacts/reports/cv_1ans/cv_results.json",
+    "cv20-1ans": "artifacts/reports/cv20_1ans/cv_results.json",
+}
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cv10-2ans", default="artifacts/reports/cv/cv_results.json")
-    ap.add_argument("--cv20-2ans", default="artifacts/reports/cv20/cv_results.json")
-    ap.add_argument("--cv10-1ans", default="artifacts/reports/cv_1ans/cv_results.json")
-    ap.add_argument("--cv20-1ans", default="artifacts/reports/cv20_1ans/cv_results.json")
+    # No path defaults: every setup must be given explicitly (or via --preset) so
+    # an omitted slot is SKIPPED, never silently filled from another dataset.
+    ap.add_argument("--cv10-2ans")
+    ap.add_argument("--cv20-2ans")
+    ap.add_argument("--cv10-1ans")
+    ap.add_argument("--cv20-1ans")
+    ap.add_argument("--preset", choices=["abnormal"],
+                    help="fill any UNSET slot with the canonical normal-vs-abnormal "
+                         "paths (the old 4-way default). Explicit --cvXX args win.")
     ap.add_argument("--metric", default="balanced_acc")
     ap.add_argument("--rank-lambda", default="0.0", help="lambda for the summary table")
     ap.add_argument("--out-dir", default="artifacts/reports/cv_compare")
@@ -288,6 +306,10 @@ def main():
 
     paths = {"cv10-2ans": args.cv10_2ans, "cv20-2ans": args.cv20_2ans,
              "cv10-1ans": args.cv10_1ans, "cv20-1ans": args.cv20_1ans}
+    if args.preset == "abnormal":
+        for k, p in ABNORMAL_PRESET.items():
+            if not paths[k]:
+                paths[k] = p
     print("loading setups:")
     data = _load(paths)
     if len(data) < 2:

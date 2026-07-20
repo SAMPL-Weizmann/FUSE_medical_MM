@@ -1,0 +1,60 @@
+#!/bin/bash
+# LSF job: OBV best-verifier frequency across CV folds (dump + plot).
+# CPU only (linear heads on pre-extracted features), retrains all folds -> same
+# weight-class as one lambda of 12_cv.py.
+#
+# Parametrized by env vars so one file serves every setup:
+#   DATA    abnormal | malig     data task (malig -> configs/data_malig.yaml)
+#   ANS     1 | 2                 answers per head (1 -> configs/fuse_1ans.yaml)
+#   LAM     0                     lambda
+#   FOLDS   10 | 20   NTEST 1|2   CV rotation
+#
+# Out dir (never collides across setups):
+#   artifacts/reports/{obv|malig_obv}{_1ans}/
+#
+# Examples:
+#   DATA=malig    ANS=1 LAM=0 bsub < scripts/wexac/obv_best_verifier.lsf   # malignant, 1-answer
+#   DATA=abnormal ANS=1 LAM=0 bsub < scripts/wexac/obv_best_verifier.lsf   # normal-vs-abnormal, 1-answer
+#   DATA=malig    ANS=2 LAM=0 bsub < scripts/wexac/obv_best_verifier.lsf   # malignant, 2-answer
+#
+#BSUB -J fuse_obv
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 2:00
+#BSUB -o logs/obv.%J.out
+#BSUB -e logs/obv.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+
+DATA="${DATA:-abnormal}"
+ANS="${ANS:-1}"
+LAM="${LAM:-0}"
+FOLDS="${FOLDS:-10}"
+NTEST="${NTEST:-1}"
+
+if [ "$DATA" = "malig" ]; then
+    export FUSE_DATA_CONFIG=configs/data_malig.yaml; PREFIX="malig_obv"
+else
+    PREFIX="obv"                                   # default data.yaml (normal-vs-abnormal)
+fi
+if [ "$ANS" = "1" ]; then FUSE_CFG="configs/fuse_1ans.yaml"; SUFFIX="_1ans"
+else                      FUSE_CFG="configs/fuse.yaml";      SUFFIX=""; fi
+OUT="artifacts/reports/${PREFIX}${SUFFIX}"
+
+echo "OBV best-verifier | data=$DATA ans=$ANS lam=$LAM folds=$FOLDS/$NTEST -> $OUT/"
+python -u scripts/21_obv_best_verifier.py dump --lambda "$LAM" \
+    --config "$FUSE_CFG" --out-dir "$OUT" --folds "$FOLDS" --n-test "$NTEST" --device cpu
+
+# plots (cheap): the requested per-set histogram + the grouped all-sets view
+python -u scripts/21_obv_best_verifier.py plot --lambda "$LAM" --out-dir "$OUT" --set test
+python -u scripts/21_obv_best_verifier.py plot --lambda "$LAM" --out-dir "$OUT" --set all
+
+echo "obv best-verifier done -> $OUT/obv_best_verifier_lambda_${LAM}_{test,all}.png"

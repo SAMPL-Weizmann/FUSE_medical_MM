@@ -71,9 +71,15 @@ SETS = ["labeled", "unlabeled", "test"]
 SAL_MANIFEST = os.path.join(sal17.OUT, "saliency_manifest.json")
 
 # --- config presets -------------------------------------------------------- #
+# `config` = the FUSE head config (omitted -> configs/fuse.yaml, 2 answers). The
+# DATA config (normal-vs-abnormal vs malignant) is chosen by FUSE_DATA_CONFIG in
+# the environment, not here, so a preset works for either task.
 PRESETS = {
     "cv10": dict(n_folds=10, n_test=1, lam=0.2, out="artifacts/reports/gradcam"),
     "cv20": dict(n_folds=20, n_test=2, lam=0.0, out="artifacts/reports/gradcam20"),
+    # normal-vs-abnormal, 1-answer heads (16 verifiers -> 8 backbone rows), lambda=0
+    "cv10_1ans": dict(n_folds=10, n_test=1, lam=0.0, config="configs/fuse_1ans.yaml",
+                      out="artifacts/reports/gradcam_1ans"),
 }
 
 
@@ -267,7 +273,7 @@ def compute(preset, device, override):
 
     n_folds, n_test, lam, out = (preset["n_folds"], preset["n_test"],
                                  preset["lam"], preset["out"])
-    cfg = load_fuse_config(None)
+    cfg = load_fuse_config(preset.get("config"))     # None -> fuse.yaml (2 answers)
     cfg["train"]["lambda_tci"] = lam
     feats_dir = cfg["io"]["features_dir"]
     verifiers = resolve_verifiers(cfg, feats_dir)

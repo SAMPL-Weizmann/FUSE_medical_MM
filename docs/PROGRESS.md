@@ -3,7 +3,78 @@
 Single-file catch-up for a fresh session. Companion to `docs/FUSE_TCI_spec.md`
 (the math). Everything below is implemented and on `main` unless marked TODO.
 
-## ⇢ LATEST SESSION HANDOFF (2026-07-14) — START HERE
+## ⇢ LATEST SESSION HANDOFF (2026-07-16) — START HERE
+**Run everything on WEXAC** ([[run-training-on-wexac]]). Local `.venv` now has
+numpy+matplotlib, so plotting from a small JSON/npz is fine LOCALLY; training /
+large-npz reads still go to LSF.
+
+**Two threads: (A) single-answer verifiers, (B) malignant relabeling + decision
+thresholds. Nothing here changes the default behaviour** — every new knob defaults
+to the old value, and new runs write to new dirs (no clobbering).
+
+**(A) Single-answer heads — `n_answers=1` → 16 verifiers (was 32).**
+- `configs/fuse_1ans.yaml` (n_answers=1, alpha_ncl=0). Guarded `_decorr_loss` for
+  <2 answers (it was NaN via `/(k(k-1))` → broke NCL/training at 1 answer). Jobs
+  `cv_1ans.lsf` / `cv20_1ans.lsf` → `reports/cv_1ans/`, `cv20_1ans/`. Reuses the
+  SAME fold files as the 2-answer runs (fair comparison).
+- **FINDING (new, robust): 1 answer BEATS 2.** fuse_ens test bAcc λ=0: 10-fold
+  .910→**.928** (+1.8), 20-fold .870→**.891** (+2.1); fold std ALSO shrank
+  (~.026→.010 @10-fold). Reproduces at both fold counts. The NCL twins were
+  COSTING accuracy+stability, not buying diversity — revises the original
+  n_answers=2 rationale. At 1-ans/10-fold, fuse_ens(λ0) ≈ the oracle ceiling.
+- `19_cv_compare.py` compares the 4 setups {10,20 fold}×{1,2 ans} by λ & method.
+  FIXED a footgun: it had default result paths, so omitting the cv20 slots
+  silently pulled the ABNORMAL cv20 into a MALIGNANT comparison. Now NO path
+  defaults (omitted slot = skipped), an explicit-but-missing path is a hard error,
+  and `--preset abnormal` restores the old 4-path convenience.
+
+**(B) Malignant vs non-malignant** (`binary_malignant_vs_rest`, committed 0cc24cb).
+- {N,B}→0, {M}→1; keeps all 1594 patients, **117 malignant = 7.3%**.
+  `configs/data_malig.yaml` + `FUSE_DATA_CONFIG` env switch. **10-fold ONLY**
+  (~12 malignant per S_L; 20-fold's ~6 is not a usable positive class).
+  `malig_cv{,_1ans}.lsf` → `reports/malig_cv{,_1ans}/`. RAN; obv top by bAcc.
+- **Decision-threshold problem (key):** at 7.3% prevalence the hardcoded **0.5**
+  cut makes the well-calibrated `oracle` predict all-negative → **bAcc 0.50 (floor)
+  while its AUC is 0.97 (best)**. bAcc@0.5 measures threshold PLACEMENT, not
+  discrimination. Fix = `src/fuse_mm/bench/thresholds.py` + `run_cv
+  --threshold-rules`: fixed / prevalence (top-π, label-free) / youden /
+  target_sensitivity. τ fit on S_L (OFF-test), all rules computed in ONE pass
+  (thresholding is post-scoring). `score_stats` now takes a per-sample threshold
+  array (per-fold τ for pooled OOF). `malig_cv_threshold.lsf` →
+  `reports/malig_cv_thr{,_1ans}/<rule>/`. youden/target restore bAcc ~.91–.93;
+  **AUC identical across rules** (they move the cut, not the ranking). All rules =
+  threshold the likelihood ratio at level c=cost×prior; Youden = LR-cut at 1.
+- **ROC/PR:** `12_cv --dump-predictions` saves pooled OOF soft scores →
+  `cv_pooled_predictions.npz`; `20_roc_pr.py` draws ROC (per-method AUC + threshold
+  dots) + a recall/precision-vs-threshold table for the top3_merged methods.
+  `malig_roc.lsf` (reruns 1-ans malignant w/ dump into `reports/malig_cv_1ans_roc/`,
+  then plots). ROC is threshold-free → oracle correctly on top (~0.97).
+
+**obv best-verifier histogram** `21_obv_best_verifier.py` (dump+plot,
+`obv_best_verifier.lsf`, env DATA/ANS/LAM). **FINDING (malignant, 1-ans, λ0): ALL
+obv picks are MG, ZERO US** — the OPPOSITE of normal-vs-abnormal (US ≫ MG). MG
+carries the malignancy signal; US carries the abnormal signal (clinically
+plausible). Only 3 of 16 verifiers ever won a fold; the plot drops zero-count bars.
+
+**1-answer XAI (normal-vs-abnormal task, λ=0)** — scripts ready, may not be run yet.
+`16_cv_ensemble_weights.py` + `18_gradcam.py` now take `--config`/`--out-dir` (16)
+and a `cv10_1ans` preset (18). `cv_ens_weights_1ans.lsf` → `ensemble_weights_1ans/`;
+`gradcam_1ans.lsf` → `gradcam_1ans/` (pins the SAME 4 patients via `--patients`,
+since the saliency manifest is NOT on the share). NOTE: 1-answer has no NCL ± twin
+contrasts, and gradcam sheets become 8 backbone rows (was 16).
+
+**Table fix:** `15_cv_tables` merged table — UNBOLDED the column-max values (bold +
+larger font overflowed the cell margin onto neighbours). Regenerated all 14
+existing merged tables (reads only the small cv_results.json → done locally).
+
+**PENDING next session**
+- Confirm `malig_roc.lsf` output (ROC + PR png) landed; eyeball.
+- Run the 1-answer XAI jobs (ens-weights + gradcam, normal-vs-abnormal) if wanted.
+- Optional: obv histogram for the abnormal setups; `--show-all` flag for zero bars.
+- Record the **1-ans > 2-ans** and **MG(malignant) vs US(abnormal)** findings in
+  [[fuse-status-findings]].
+
+## PRIOR SESSION (2026-07-14)
 **Run everything on WEXAC** (unchanged, [[run-training-on-wexac]]); local `.venv`
 only for tiny no-I/O checks. NOTE: the Grad-CAM `.npz` are now small (~11 MB, the
 ≤320 px cap) so `18_gradcam.py plot` runs fine LOCALLY — no LSF needed for figures.

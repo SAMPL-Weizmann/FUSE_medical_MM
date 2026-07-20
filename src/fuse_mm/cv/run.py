@@ -18,11 +18,13 @@ import numpy as np
 
 from ..bench import methods as M
 from ..bench.metrics import score_stats
+from ..bench.thresholds import choose_threshold
 from ..fuse.bank import build_bank_pooled, load_full_featuresets, resolve_verifiers
 from ..fuse.train import fit_and_score
 from .folds import fold_assignment, load_cv_folds, make_cv_folds
 
 SETS = ["labeled", "unlabeled", "test"]
+FIT_SET = "labeled"      # tau is fit here (off-test) then applied to every set
 
 
 def _agg(dicts):
@@ -31,7 +33,21 @@ def _agg(dicts):
                 "std": float(np.std([d[k] for d in dicts]))} for k in keys}
 
 
-def run_cv(cfg, lambdas, n_folds=10, n_test=1, device="cpu", out_dir=None, verbose=False):
+def run_cv(cfg, lambdas, n_folds=10, n_test=1, device="cpu", out_dir=None, verbose=False,
+           threshold_rules=("fixed",), prevalence=None, target_sensitivity=0.95,
+           dump_predictions=False):
+    """Full-pipeline CV. `threshold_rules` selects the decision threshold(s) used to
+    turn soft scores into 0/1 calls (see bench.thresholds). Each rule is scored in
+    the SAME pass (thresholding is post-scoring, so extra rules are ~free). Output:
+    one cv_results.json per rule; the default ("fixed" = 0.5) writes to out_dir
+    unchanged, other rules write to out_dir/<rule>/ so nothing is overwritten.
+
+    dump_predictions: also save the pooled out-of-fold soft scores (each patient
+    tested once) to out_dir/cv_pooled_predictions.npz, keyed "<lambda>__<method>",
+    plus shared "y". These are threshold-free -> the input for ROC / PR curves
+    (scripts/20_roc_pr.py). Off by default; adds no cost beyond the npz write."""
+    rules = list(threshold_rules)
+    thr_kw = {"prevalence": prevalence, "target_sensitivity": target_sensitivity}
     feats_dir = cfg["io"]["features_dir"]
     verifiers = resolve_verifiers(cfg, feats_dir)
     full_fs = load_full_featuresets(feats_dir, verifiers)     # all cohort patients, once
@@ -42,13 +58,17 @@ def run_cv(cfg, lambdas, n_folds=10, n_test=1, device="cpu", out_dir=None, verbo
     n_folds = folds["n_folds"]
 
     all_methods = {**M.UNSUPERVISED, **M.SUPERVISED, **M.CEILING}
-    results = {}
+    results = {r: {} for r in rules}                          # rule -> {lam: {...}}
+    dump = {}                                                 # "<lam>__<method>" -> pooled OOF score
+    dump_y = None                                             # shared pooled OOF labels
 
     for lam in lambdas:
         lcfg = copy.deepcopy(cfg)
         lcfg["train"]["lambda_tci"] = lam
-        per_fold = defaultdict(lambda: defaultdict(list))     # method -> set -> [metricdict]
-        pooled = defaultdict(lambda: ([], []))                # method -> (y_list, score_list) for Test
+        # rule -> method -> set -> [metricdict]
+        per_fold = {r: defaultdict(lambda: defaultdict(list)) for r in rules}
+        # rule -> method -> (y_list, score_list, tau_list) for pooled Test
+        pooled = {r: defaultdict(lambda: ([], [], [])) for r in rules}
         skipped = set()
 
         for i in range(n_folds):
@@ -66,31 +86,59 @@ def run_cv(cfg, lambdas, n_folds=10, n_test=1, device="cpu", out_dir=None, verbo
                     pred = fn(V, Y)
                 except NotImplementedError:
                     skipped.add(name); continue
-                for s in SETS:
-                    per_fold[name][s].append(score_stats(pred[s], Y[s]))
-                pooled[name][0].append(Y["test"]); pooled[name][1].append(pred["test"])
+                for r in rules:
+                    tau = choose_threshold(r, pred[FIT_SET], Y[FIT_SET], **thr_kw)
+                    for s in SETS:
+                        per_fold[r][name][s].append(score_stats(pred[s], Y[s], threshold=tau))
+                    yt, pt = Y["test"], pred["test"]
+                    pooled[r][name][0].append(yt)
+                    pooled[r][name][1].append(pt)
+                    pooled[r][name][2].append(np.full(len(pt), tau))   # per-fold tau
             print(f"  lambda={lam} fold {i+1}/{n_folds} done", flush=True)
 
-        results[str(lam)] = {
-            "methods": {
-                name: {
-                    "per_fold": {s: _agg(per_fold[name][s]) for s in SETS},
-                    "pooled_test": score_stats(np.concatenate(pooled[name][1]),
-                                               np.concatenate(pooled[name][0])),
-                } for name in per_fold
-            },
-            "skipped": sorted(skipped),
-        }
+        for r in rules:
+            results[r][str(lam)] = {
+                "methods": {
+                    name: {
+                        "per_fold": {s: _agg(per_fold[r][name][s]) for s in SETS},
+                        "pooled_test": score_stats(
+                            np.concatenate(pooled[r][name][1]),
+                            np.concatenate(pooled[r][name][0]),
+                            threshold=np.concatenate(pooled[r][name][2])),
+                    } for name in per_fold[r]
+                },
+                "skipped": sorted(skipped),
+            }
 
-    out_dir = out_dir or os.path.join(os.path.dirname(cfg["io"]["out_dir"]), "reports", "cv")
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, "cv_results.json"), "w", encoding="utf-8") as f:
-        json.dump({"n_folds": n_folds, "n_test": n_test, "lambdas": lambdas,
-                   "results": results}, f, indent=2)
-    _write_csv(results, out_dir)
-    _print(results)
-    print(f"\nwrote cv_results.json + cv_summary.csv to {out_dir}/")
-    return results
+        if dump_predictions:                                 # pooled OOF is threshold-free
+            r0 = rules[0]
+            for name in pooled[r0]:
+                if dump_y is None:
+                    dump_y = np.concatenate(pooled[r0][name][0])
+                dump[f"{lam}__{name}"] = np.concatenate(pooled[r0][name][1])
+
+    base_out = out_dir or os.path.join(os.path.dirname(cfg["io"]["out_dir"]), "reports", "cv")
+    for r in rules:
+        # default single-rule "fixed" keeps the historical path; others get a subdir
+        r_out = base_out if rules == ["fixed"] else os.path.join(base_out, r)
+        os.makedirs(r_out, exist_ok=True)
+        with open(os.path.join(r_out, "cv_results.json"), "w", encoding="utf-8") as f:
+            json.dump({"n_folds": n_folds, "n_test": n_test, "lambdas": lambdas,
+                       "threshold_rule": r, "threshold_params": thr_kw,
+                       "results": results[r]}, f, indent=2)
+        _write_csv(results[r], r_out)
+        if len(rules) > 1:
+            print(f"\n### threshold rule: {r} ###")
+        _print(results[r])
+        print(f"\nwrote cv_results.json + cv_summary.csv to {r_out}/")
+
+    if dump_predictions and dump:
+        os.makedirs(base_out, exist_ok=True)
+        np.savez_compressed(os.path.join(base_out, "cv_pooled_predictions.npz"),
+                            y=dump_y, **dump)
+        print(f"wrote cv_pooled_predictions.npz ({len(dump)} lambda-method arrays) "
+              f"to {base_out}/")
+    return results if len(rules) > 1 else results[rules[0]]
 
 
 def _write_csv(results, out_dir):

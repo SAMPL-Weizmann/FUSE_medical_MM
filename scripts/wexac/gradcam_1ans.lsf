@@ -1,0 +1,46 @@
+#!/bin/bash
+# LSF job: verifier Grad-CAM, 1-ANSWER heads, normal-vs-abnormal task, lambda=0
+# (preset cv10_1ans -> configs/fuse_1ans.yaml, 8 backbone rows per sheet).
+# Retrains all 10 folds' heads (to rank folds by fuse_ens test bAcc for the
+# per-patient role columns) AND runs the live backbones on the raw scans
+# (GPU + dataset access on /home/hsd). Reuses the SAME 4 patients as the abnormal
+# saliency/Grad-CAM (via saliency_manifest.json). Writes to a SEPARATE dir
+# (gradcam_1ans/) so the 2-answer sheets are not overwritten.
+#
+#   bsub < scripts/wexac/gradcam_1ans.lsf
+#
+# After it finishes, build the figures (locally or on WEXAC):
+#   python scripts/18_gradcam.py plot --config cv10_1ans
+#
+#BSUB -J fuse_gcam1ans
+#BSUB -q short-gpu
+#BSUB -gpu "num=1"
+#BSUB -n 2
+#BSUB -R "rusage[mem=32GB] span[hosts=1]"
+#BSUB -W 2:00
+#BSUB -o logs/gradcam_1ans.%J.out
+#BSUB -e logs/gradcam_1ans.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+# normal-vs-abnormal task -> default configs/data.yaml (do NOT set FUSE_DATA_CONFIG)
+
+DEV="cuda"
+python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" || DEV="cpu"
+echo "grad-cam cv10_1ans (1-answer, lambda=0) compute on device=$DEV"
+
+# Pin the SAME 4 patients as the abnormal saliency/Grad-CAM (2 abnormal + 2 normal:
+# benign 1205002637591, malignant 1205002616396, normal 1205003172923 / 1205004142062).
+# The saliency_manifest.json those runs used is not on the shared artifacts, so we
+# pass the ids explicitly instead of relying on the manifest-reuse fallback.
+PATIENTS="1205002637591 1205002616396 1205003172923 1205004142062"
+python -u scripts/18_gradcam.py compute --config cv10_1ans --device "$DEV" \
+    --patients $PATIENTS
+
+echo "grad-cam cv10_1ans done -> artifacts/reports/gradcam_1ans/ (gcam_*.npz + manifest)"

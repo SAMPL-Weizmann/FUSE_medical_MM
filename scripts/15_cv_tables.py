@@ -232,28 +232,21 @@ def table_merged_top3(res, lambdas, out, n_folds=10):
     for m in top_a:
         _add(m, auc[m][0], "AUC")
 
-    rows, nummat = [], []
+    rows = []
     for o in order:
         m, lam = o["m"], o["lam"]
         sel = "both" if o["sel"] == {"bAcc", "AUC"} else next(iter(o["sel"]))
         rows.append({"lead": [m, f"{float(lam):g}", sel],
                      "cells": _row_cells(res, lam, m),
                      "color": CAT_COLOR[CATEGORY[m]]})
-        nummat.append([[_pf(res, lam, m, s, mk)[0] for s, _ in SETS]
-                       for mk, _ in METRICS])
 
-    # bold the column-max in every metric sub-column
-    bold = set()
-    nr = len(rows)
-    for g in range(len(METRICS)):
-        for s in range(len(SETS)):
-            bold.add((max(range(nr), key=lambda i: nummat[i][g][s]), g, s))
-
+    # NOTE: column-max values are intentionally NOT bolded — the bold weight +
+    # larger font overflowed the cell margin and covered neighbouring values.
     title = ("Best methods: top-3 by test bAcc $\\cup$ top-3 by test AUC "
              "(best $\\lambda$ per method)  (%)")
     render_table(os.path.join(out, "cv_table_top3_merged.png"), title, rows,
                  lead_specs=[("Method", 2.6), ("$\\lambda$", 0.7), ("top-3 in", 1.15)],
-                 bold=bold, n_folds=n_folds)
+                 n_folds=n_folds)
     write_csv(os.path.join(out, "cv_table_top3_merged.csv"), rows,
               ["method", "lambda", "top3_in"])
 

@@ -1,0 +1,45 @@
+#!/bin/bash
+# LSF job: ROC + precision/recall-vs-threshold for the MALIGNANT 1-ANSWER setup.
+#
+# The pooled per-patient scores a ROC needs are NOT in cv_results.json, so this
+# re-runs the 1-answer malignant CV once WITH --dump-predictions (into a fresh
+# dir, so the existing malig_cv_1ans/ results are untouched), then draws:
+#   roc_malig_1ans.png         ROC per method (top-3-by-bAcc U top-3-by-AUC),
+#                              AUC in the legend, dots = decision thresholds
+#   pr_table_malig_1ans.{png,csv}  recall & precision at a grid of thresholds
+#
+#   bsub < scripts/wexac/malig_roc.lsf
+#
+#BSUB -J fuse_malig_roc
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 11:59
+#BSUB -o logs/malig_roc.%J.out
+#BSUB -e logs/malig_roc.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+export FUSE_DATA_CONFIG=configs/data_malig.yaml
+
+BASE="artifacts/reports/malig_cv_1ans_roc"     # fresh dir -> malig_cv_1ans/ untouched
+LAMBDAS="${LAMBDAS:-0 0.1 0.2 0.3 0.5 1}"      # all lambdas: merged-top3 spans several
+
+echo "re-running 1-answer malignant CV with prediction dump -> $BASE/"
+python -u scripts/12_cv.py --config configs/fuse_1ans.yaml \
+    --lambdas $LAMBDAS --folds 10 --n-test 1 --device cpu \
+    --dump-predictions --out-dir "$BASE"
+
+echo "plotting ROC + PR table"
+python -u scripts/20_roc_pr.py \
+    --results "$BASE/cv_results.json" \
+    --predictions "$BASE/cv_pooled_predictions.npz" \
+    --tag malig_1ans
+
+echo "malig ROC done -> $BASE/roc_malig_1ans.png + pr_table_malig_1ans.{png,csv}"

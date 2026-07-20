@@ -1,0 +1,41 @@
+#!/bin/bash
+# LSF job: per-fold fuse_ens ensemble weights, 1-ANSWER heads (16 verifiers),
+# normal-vs-abnormal task, lambda=0. Companion to cv_ens_weights.lsf (2 answers).
+# CPU only (linear heads on pre-extracted features), retrains all 10 folds.
+# Writes to a SEPARATE dir so the 2-answer figures are not overwritten.
+# Override lambda with LAM="0.1".
+#
+#   bsub < scripts/wexac/cv_ens_weights_1ans.lsf
+#
+# After it finishes, build the two figures (locally is fine — plot reads the JSON):
+#   python scripts/16_cv_ensemble_weights.py plot --lambda 0 \
+#          --out-dir artifacts/reports/ensemble_weights_1ans
+#   -> cv_ens_weights_lambda_0_lexicographic.png  (+ _by_bestfold.png)
+#
+#BSUB -J fuse_ensw1
+#BSUB -q medium
+#BSUB -n 1
+#BSUB -R "rusage[mem=16GB]"
+#BSUB -W 2:00
+#BSUB -o logs/cv_ensw_1ans.%J.out
+#BSUB -e logs/cv_ensw_1ans.%J.err
+
+set -eo pipefail
+cd "$LS_SUBCWD"
+mkdir -p logs
+
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+source scripts/wexac/activate.sh
+source scripts/wexac/env.sh
+# normal-vs-abnormal task -> default configs/data.yaml (do NOT set FUSE_DATA_CONFIG)
+
+LAM="${LAM:-0}"
+OUT="artifacts/reports/ensemble_weights_1ans"
+python -u scripts/16_cv_ensemble_weights.py dump --lambda "$LAM" \
+    --config configs/fuse_1ans.yaml --out-dir "$OUT" --device cpu
+
+# plot too (cheap) so the figures come out of the same job
+python -u scripts/16_cv_ensemble_weights.py plot --lambda "$LAM" --out-dir "$OUT"
+
+echo "ens-weights (1-answer) done -> $OUT/cv_ens_weights_lambda_${LAM}_lexicographic.png"
